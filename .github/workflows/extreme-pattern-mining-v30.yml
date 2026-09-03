@@ -5,6 +5,7 @@ on:
   push:
     paths:
       - 'market_data/extreme_pattern_mining_v30.py'
+      - 'market_data/extreme_pattern_mining_v30_cloud.py'
       - '.github/workflows/extreme-pattern-mining-v30.yml'
 
 permissions:
@@ -33,7 +34,7 @@ jobs:
         run: |
           rm -rf data results && mkdir -p data results
           python oos_core_collect.py
-          python extreme_pattern_mining_v30.py
+          python extreme_pattern_mining_v30_cloud.py
       - uses: actions/upload-artifact@v4
         with:
           name: extreme-pattern-mining-v30-${{ github.run_id }}
