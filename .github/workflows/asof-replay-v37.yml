@@ -1,0 +1,47 @@
+name: asof-replay-v37
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'market_data/asof_replay_request.json'
+  workflow_dispatch:
+
+jobs:
+  replay-and-push:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: pip install -r market_data/requirements.txt pytdx scikit-learn
+
+      - name: Load replay request
+        shell: bash
+        run: |
+          echo "ASOF_SYMBOL=$(python -c \"import json;print(json.load(open('market_data/asof_replay_request.json'))['证券代码'])\")" >> "$GITHUB_ENV"
+          echo "ASOF_DATE=$(python -c \"import json;print(json.load(open('market_data/asof_replay_request.json'))['日期'])\")" >> "$GITHUB_ENV"
+          echo "ASOF_TIME=$(python -c \"import json;print(json.load(open('market_data/asof_replay_request.json'))['时间'])\")" >> "$GITHUB_ENV"
+
+      - name: Strict as-of replay
+        run: python market_data/asof_replay_v37.py
+
+      - name: Push compact Feishu card
+        env:
+          FEISHU_WEBHOOK_URL: ${{ secrets.FEISHU_WEBHOOK_URL }}
+          FEISHU_CARD_FILE: market_data/results/asof_replay_card.json
+        run: python market_data/feishu_notifier.py
+
+      - name: Upload replay audit
+        uses: actions/upload-artifact@v4
+        with:
+          name: asof-replay-v37-${{ github.run_id }}
+          path: |
+            market_data/results/asof_replay_v37.json
+            market_data/results/asof_replay_card.json
