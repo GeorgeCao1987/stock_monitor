@@ -18,7 +18,7 @@ jobs:
           - { name: may-jun, start: '2026-05-01', end: '2026-06-30' }
           - { name: jul-aug, start: '2026-07-01', end: '2026-08-31' }
     runs-on: ubuntu-latest
-    timeout-minutes: 18
+    timeout-minutes: 24
     env:
       MARKET_START_DATE: ${{ matrix.period.start }}
       MARKET_END_DATE: ${{ matrix.period.end }}
@@ -32,13 +32,16 @@ jobs:
       - run: |
           pip install -r market_data/requirements.txt
           pip install pytdx
-      - name: Mechanical full-day stage replay
+      - name: Mechanical full-day stage replay with external event context
         working-directory: market_data
         run: |
           rm -rf data results && mkdir -p data results
           python oos_core_collect.py
+          python news_collector.py
           python stage_extreme_replay_v19_cloud.py
       - uses: actions/upload-artifact@v4
         with:
-          name: stage-v19-${{ matrix.period.name }}-${{ github.run_id }}
-          path: market_data/results/
+          name: stage-v19-event-context-${{ matrix.period.name }}-${{ github.run_id }}
+          path: |
+            market_data/results/
+            market_data/data/news_events.csv
