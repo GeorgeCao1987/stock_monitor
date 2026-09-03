@@ -1,9 +1,11 @@
 from pathlib import Path
 import json
+from typing import Optional
 import pandas as pd
 
 import event_engine_v14 as e14
 from opening_regime_diagnostics import add_opening_regime, OPEN_BARS
+from external_event_context import attach_daily_event_context, event_context_schema
 
 BASE = Path(__file__).resolve().parent
 RESULTS = BASE / "results"
@@ -27,12 +29,19 @@ def forecast_from_votes(up_votes: int, down_votes: int) -> str:
     return "UNCERTAIN"
 
 
-def add_extreme_forecast(daily: pd.DataFrame) -> pd.DataFrame:
+def add_extreme_forecast(daily: pd.DataFrame, event_context: Optional[pd.DataFrame] = None) -> pd.DataFrame:
     z = daily.copy()
     z["forecast"] = [
         forecast_from_votes(int(u), int(d))
         for u, d in zip(z.opening_up_votes, z.opening_down_votes)
     ]
+
+    # External realtime messages are a separate condition from overseas price
+    # priors.  They are attached here for diagnostics/stratification only.
+    # V1.8 frozen vote thresholds remain unchanged until incremental backtests
+    # prove a stable benefit from the event layer.
+    z = attach_daily_event_context(z, event_context)
+
     z["high_after_10"] = z.high_bar_no >= OPEN_BARS
     z["low_after_10"] = z.low_bar_no >= OPEN_BARS
     z["high_ahead_pattern"] = z.high_after_10 & (~z.low_after_10)
@@ -57,11 +66,17 @@ def state_metrics(z: pd.DataFrame) -> dict:
 def main():
     x = e14.build_scored_frame()
     _, daily = add_opening_regime(x)
-    daily = add_extreme_forecast(daily)
+    # Historical realtime-event snapshots are injected by callers/backtests.
+    # None means the price-only V1.8 baseline and is explicitly marked unavailable.
+    daily = add_extreme_forecast(daily, event_context=None)
 
     states = {
         state: state_metrics(daily[daily.forecast == state])
         for state in ["HIGH_AHEAD", "LOW_AHEAD", "UNCERTAIN"]
+    }
+    event_states = {
+        bucket: state_metrics(daily[daily.event_bucket == bucket])
+        for bucket in ["POSITIVE", "NEGATIVE", "NEUTRAL"]
     }
     report = {
         "version": "opening-extreme-forecast-v18",
@@ -74,6 +89,9 @@ def main():
             "v17_turn_confirmation_changed": False,
             "no_future_leakage": True,
         },
+        "external_realtime_event_context": event_context_schema(),
+        "event_context_available_days": int(daily.event_context_available.sum()),
+        "event_context_by_bucket": event_states,
         "trading_days": int(len(daily)),
         "forecast_counts": daily.forecast.value_counts().to_dict(),
         "states": states,
@@ -83,7 +101,8 @@ def main():
         },
         "note": (
             "Daily high/low locations are future labels used only for evaluation. "
-            "The forecast itself uses the completed opening snapshot only."
+            "The forecast itself uses the completed opening snapshot only. "
+            "External news/event context is recorded separately and currently has zero model weight until incremental validation."
         ),
     }
     daily.to_csv(RESULTS / "opening_extreme_forecast_v18.csv", index=False)
