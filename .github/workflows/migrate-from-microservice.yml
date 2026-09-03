@@ -22,20 +22,17 @@ jobs:
         run: |
           git clone --depth 1 --branch market-data-v13 https://github.com/GeorgeCao1987/microservice.git /tmp/source
 
-      - name: Copy stock model only
+      - name: Copy stock model code and strategy
         run: |
           rm -rf market_data
-          mkdir -p .github/workflows
           cp -a /tmp/source/market_data ./market_data
           cp /tmp/source/STRATEGY.md ./STRATEGY.md
-          cp /tmp/source/.github/workflows/*.yml ./.github/workflows/
-          rm -f .github/workflows/migrate-from-microservice.yml
 
       - name: Commit migrated model
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add -A
+          git add market_data STRATEGY.md
           if git diff --cached --quiet; then
             echo "No migration changes"
             exit 0
