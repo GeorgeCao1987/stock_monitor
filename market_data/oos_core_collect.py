@@ -114,7 +114,9 @@ def fetch_pytdx_history(symbol, is_index=False):
             print(f"{kind}_SERVER_OK", symbol, ip, port,
                   "range", tdf.iloc[0]["datetime"], tdf.iloc[-1]["datetime"])
             parts = []
-            for page in range(16):
+            # 28 pages gives enough depth for older untouched holdouts while the
+            # exact-session validator still prevents partial history from passing.
+            for page in range(28):
                 rows = getter(0, market, code, page * 800, 800) or []
                 if not rows:
                     break
