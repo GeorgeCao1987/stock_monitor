@@ -1,0 +1,66 @@
+name: v16-jan-feb-holdout
+
+on:
+  push:
+    branches: [ market-data-v13 ]
+    paths:
+      - '.github/workflows/v16-jan-feb-holdout.yml'
+  workflow_dispatch:
+
+jobs:
+  holdout:
+    runs-on: ubuntu-latest
+    timeout-minutes: 18
+    env:
+      MARKET_START_DATE: '2026-01-01'
+      MARKET_END_DATE: '2026-02-28'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: pip
+          cache-dependency-path: market_data/requirements.txt
+      - name: Install dependencies
+        run: |
+          pip install -r market_data/requirements.txt
+          pip install pytdx
+      - name: Collect untouched Jan-Feb core data and hard validate
+        working-directory: market_data
+        run: |
+          rm -rf data results
+          mkdir -p data results
+          python oos_core_collect.py
+          test ! -e data/news_events.csv
+          if compgen -G 'data/o_*.csv' > /dev/null; then exit 1; fi
+          if compgen -G 'data/macro_*.csv' > /dev/null; then exit 1; fi
+      - name: Run unchanged V1.4 baseline
+        working-directory: market_data
+        run: |
+          python backtest_v14_cloud.py
+          python event_engine_v14_cloud.py
+      - name: Run frozen V1.6 action policy
+        working-directory: market_data
+        run: python event_engine_v16_cloud.py
+      - name: Print holdout comparison
+        working-directory: market_data
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          for name in ['summary_events_v14.json','summary_events_v16.json']:
+              p=Path('results')/name
+              print('\n###',name)
+              print(p.read_text())
+          PY
+      - name: Upload untouched Jan-Feb holdout
+        uses: actions/upload-artifact@v4
+        with:
+          name: v16-holdout-jan-feb-${{ github.run_id }}
+          path: |
+            market_data/results/completeness.csv
+            market_data/results/summary_v14.json
+            market_data/results/summary_events_v14.json
+            market_data/results/summary_events_v16.json
+            market_data/results/events_v16.csv
+          retention-days: 90

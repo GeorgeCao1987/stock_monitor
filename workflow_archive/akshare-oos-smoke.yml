@@ -1,0 +1,43 @@
+name: akshare-oos-smoke
+
+on:
+  push:
+    branches: [ market-data-v13 ]
+    paths:
+      - '.github/workflows/akshare-oos-smoke.yml'
+  workflow_dispatch:
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Probe AKShare 5m OOS history
+        run: |
+          pip -q install akshare pandas exchange-calendars
+          python - <<'PY'
+          import akshare as ak, pandas as pd
+          import exchange_calendars as xcals
+
+          start='2026-05-01 00:00:00'; end='2026-06-30 23:59:59'
+          tests={
+            '002916': lambda: ak.stock_zh_a_hist_min_em(symbol='002916',period='5',start_date=start,end_date=end,adjust=''),
+            '000001.SH': lambda: ak.index_zh_a_hist_min_em(symbol='000001',period='5',start_date=start,end_date=end),
+          }
+          sessions=xcals.get_calendar('XSHG').sessions_in_range(pd.Timestamp('2026-05-01'),pd.Timestamp('2026-06-30'))
+          expected=set(pd.DatetimeIndex(sessions).tz_localize(None).normalize())
+          print('expected_days',len(expected))
+          for sym,fn in tests.items():
+              x=fn(); print('SYM',sym,'shape',x.shape,'cols',list(x.columns))
+              print(x.head(2).to_string(index=False)); print(x.tail(2).to_string(index=False))
+              tcol='时间' if '时间' in x.columns else x.columns[0]
+              ts=pd.to_datetime(x[tcol],errors='coerce'); counts=pd.Series(1,index=ts).groupby(ts.dt.normalize()).sum()
+              got=set(ts.dt.normalize())
+              print('CHECK',sym,'rows',len(x),'days',len(got),'minmax',int(counts.min()) if len(counts) else None,int(counts.max()) if len(counts) else None,'missing',len(expected-got),'min',ts.min(),'max',ts.max())
+              if len(x)!=1872 or len(got)!=39 or counts.min()!=48 or counts.max()!=48 or got!=expected:
+                  raise SystemExit(f'{sym} NOT_EXACT_39x48')
+          print('AKSHARE_OOS_EXACT_OK')
+          PY

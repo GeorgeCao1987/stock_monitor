@@ -1,0 +1,44 @@
+name: baostock-batch-smoke
+
+on:
+  push:
+    branches: [ market-data-v13 ]
+    paths:
+      - '.github/workflows/baostock-batch-smoke.yml'
+  workflow_dispatch:
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install
+        run: pip -q install baostock pandas exchange-calendars
+      - name: Fetch exact 39x48 for all A-share symbols
+        working-directory: market_data
+        run: |
+          timeout 180s python - <<'PY'
+          import pandas as pd
+          from baostock_batch import fetch_baostock_batch
+          from validate import validate_a_share
+          import config
+
+          config.START_DATE='2026-05-01'
+          config.END_DATE='2026-06-30'
+          symbols={k:v['sina'] for k,v in config.A_SHARES.items()}
+          out=fetch_baostock_batch(symbols,'2026-05-01','2026-06-30')
+          ok=True
+          for symbol,x in out.items():
+              _,sm=validate_a_share(x,symbol)
+              r=sm.iloc[0]
+              print('CHECK',symbol,'rows',len(x),'days',int(r['days']),'expected',int(r['expected_days']),'complete',float(r['completeness']))
+              if int(r['days'])!=39 or int(r['bars'])!=1872 or float(r['completeness'])!=1.0:
+                  ok=False
+          if not ok:
+              raise SystemExit('BATCH_NOT_EXACT')
+          print('BAOSTOCK_BATCH_EXACT_ALL_OK')
+          PY

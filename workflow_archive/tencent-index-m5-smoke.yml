@@ -1,0 +1,39 @@
+name: tencent-index-m5-smoke
+
+on:
+  push:
+    branches: [ market-data-v13 ]
+    paths:
+      - '.github/workflows/tencent-index-m5-smoke.yml'
+  workflow_dispatch:
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Count Tencent Shanghai index 5m history
+        run: |
+          pip -q install requests pandas
+          python - <<'PY'
+          import requests, pandas as pd
+          url='https://ifzq.gtimg.cn/appstock/app/kline/mkline'
+          r=requests.get(url,params={'param':'sh000001,m5,,3000'},headers={'User-Agent':'Mozilla/5.0','Referer':'https://gu.qq.com/'},timeout=15)
+          print('status',r.status_code,'bytes',len(r.content),'url',r.url)
+          r.raise_for_status()
+          d=((r.json().get('data') or {}).get('sh000001') or {})
+          print('keys',list(d.keys()))
+          rows=d.get('m5') or []
+          print('m5_count',len(rows))
+          if not rows:
+              print(str(d)[:3000]); raise SystemExit('NO_M5')
+          print('first',rows[0]); print('last',rows[-1])
+          ts=pd.to_datetime([x[0] for x in rows],errors='coerce')
+          print('min_ts',ts.min(),'max_ts',ts.max(),'days',ts.normalize().nunique())
+          counts=pd.Series(1,index=ts).groupby(ts.normalize()).sum()
+          print('daily_minmax',int(counts.min()),int(counts.max()))
+          print('covers_may_june',bool(ts.min() <= pd.Timestamp('2026-05-06') and ts.max() >= pd.Timestamp('2026-06-30 15:00')))
+          PY

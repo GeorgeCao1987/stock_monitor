@@ -1,0 +1,94 @@
+name: oos-replay-may-jun-2026
+
+on:
+  push:
+    branches: [ market-data-v13 ]
+    paths:
+      - 'market_data/run_pipeline.py'
+      - 'market_data/collectors.py'
+      - 'market_data/validate.py'
+      - 'market_data/backtest_v13.py'
+      - 'market_data/backtest_v13_cloud.py'
+      - 'market_data/backtest_v14.py'
+      - 'market_data/backtest_v14_cloud.py'
+      - 'market_data/event_engine_v14.py'
+      - 'market_data/event_engine_v14_cloud.py'
+      - '.github/workflows/oos-replay-may-jun-2026.yml'
+  workflow_dispatch:
+
+concurrency:
+  group: oos-replay-may-jun-2026
+  cancel-in-progress: true
+
+env:
+  MARKET_START_DATE: '2026-05-01'
+  MARKET_END_DATE: '2026-06-30'
+
+jobs:
+  collect-validate-replay:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+          cache-dependency-path: market_data/requirements.txt
+      - name: Install dependencies
+        run: pip install -r market_data/requirements.txt
+      - name: Collect May-June A-share history and macro context
+        working-directory: market_data
+        run: python run_pipeline.py
+      - name: Require exact 39-session OOS coverage
+        working-directory: market_data
+        run: |
+          python - <<'PY'
+          import pandas as pd
+          from pathlib import Path
+
+          p = Path('results/completeness.csv')
+          if not p.exists():
+              raise SystemExit('missing completeness.csv')
+          sm = pd.read_csv(p)
+          symbols = ['002916','002463','600183','002938','603228','300476','000001.SH']
+          got = set(sm['symbol'].astype(str))
+          for symbol in symbols:
+              if symbol not in got:
+                  raise SystemExit(f'missing completeness row: {symbol}')
+              r = sm[sm['symbol'].astype(str) == symbol].iloc[0]
+              print(symbol, r.to_dict())
+              if (
+                  int(r['expected_days']) != 39 or
+                  int(r['days']) != 39 or
+                  int(r['complete_days']) != 39 or
+                  int(r['missing_days']) != 0 or
+                  int(r['incomplete_days']) != 0 or
+                  int(r['bars']) != 1872 or
+                  abs(float(r['completeness']) - 1.0) > 1e-12
+              ):
+                  raise SystemExit(f'OOS coverage not exact for {symbol}')
+          PY
+      - name: Collect historical news without blocking price replay
+        working-directory: market_data
+        run: python news_collector.py
+        continue-on-error: true
+      - name: Run unchanged V1.3 baseline on OOS
+        working-directory: market_data
+        run: python backtest_v13_cloud.py
+      - name: Run frozen V1.4 on OOS
+        working-directory: market_data
+        run: python backtest_v14_cloud.py
+      - name: Run frozen asymmetric event state machine on OOS
+        working-directory: market_data
+        run: python event_engine_v14_cloud.py
+      - name: Upload OOS data and results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: oos-may-jun-2026-${{ github.run_id }}
+          path: |
+            market_data/data/
+            market_data/results/
+          if-no-files-found: warn
+          retention-days: 90

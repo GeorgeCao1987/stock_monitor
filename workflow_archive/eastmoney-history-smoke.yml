@@ -1,0 +1,52 @@
+name: eastmoney-history-smoke
+
+on:
+  push:
+    branches: [ market-data-v13 ]
+    paths:
+      - '.github/workflows/eastmoney-history-smoke.yml'
+  workflow_dispatch:
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Test Eastmoney 002916 May-Jun 5m history
+        run: |
+          pip -q install requests pandas exchange-calendars
+          python - <<'PY'
+          import requests, pandas as pd
+          import exchange_calendars as xcals
+
+          url='https://push2his.eastmoney.com/api/qt/stock/kline/get'
+          params={
+              'secid':'0.002916','klt':5,'fqt':0,
+              'beg':'20260501','end':'20260630','lmt':100000,
+              'fields1':'f1,f2,f3,f4,f5,f6',
+              'fields2':'f51,f52,f53,f54,f55,f56,f57,f58,f59,f60,f61'
+          }
+          r=requests.get(url, params=params, headers={'User-Agent':'Mozilla/5.0'}, timeout=15)
+          print('status',r.status_code,'bytes',len(r.content))
+          r.raise_for_status()
+          data=(r.json().get('data') or {})
+          kl=data.get('klines') or []
+          print('name',data.get('name'),'count',len(kl))
+          if not kl:
+              raise SystemExit('no klines')
+          ts=pd.to_datetime([x.split(',')[0] for x in kl])
+          print('min',ts.min(),'max',ts.max(),'days',ts.normalize().nunique())
+          counts=pd.Series(1,index=ts).groupby(ts.normalize()).sum()
+          print('daily min/max',int(counts.min()),int(counts.max()))
+          cal=xcals.get_calendar('XSHG')
+          sessions=cal.sessions_in_range(pd.Timestamp('2026-05-01'),pd.Timestamp('2026-06-30'))
+          expected=set(pd.DatetimeIndex(sessions).tz_localize(None).normalize())
+          got=set(pd.DatetimeIndex(ts).normalize())
+          print('expected_sessions',len(expected),'got_sessions',len(got),'missing',len(expected-got))
+          if len(kl)!=1872 or len(got)!=39 or counts.min()!=48 or counts.max()!=48 or expected!=got:
+              raise SystemExit('Eastmoney OOS history is not exact 39x48')
+          print('EASTMONEY_EXACT_39x48_OK')
+          PY

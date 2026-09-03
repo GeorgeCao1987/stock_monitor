@@ -1,0 +1,36 @@
+name: naver-korea-history-smoke
+
+on:
+  push:
+    branches: [ market-data-v13 ]
+    paths:
+      - '.github/workflows/naver-korea-history-smoke.yml'
+  workflow_dispatch:
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Probe historical intraday pages
+        run: |
+          pip -q install requests beautifulsoup4 pandas lxml
+          python - <<'PY'
+          import requests
+          from bs4 import BeautifulSoup
+          for code in ['005930','000660']:
+              url='https://finance.naver.com/item/sise_time.naver'
+              r=requests.get(url,params={'code':code,'thistime':'20260630150000','page':1},headers={'User-Agent':'Mozilla/5.0','Referer':'https://finance.naver.com/'},timeout=15)
+              print('CODE',code,'STATUS',r.status_code,'BYTES',len(r.content),'URL',r.url)
+              txt=r.content.decode('euc-kr','ignore')
+              soup=BeautifulSoup(txt,'lxml')
+              rows=[]
+              for tr in soup.select('table.type2 tr'):
+                  tds=[td.get_text(strip=True) for td in tr.select('td')]
+                  if tds: rows.append(tds)
+              print('ROWS',len(rows))
+              for row in rows[:12]: print('ROW',row)
+          PY

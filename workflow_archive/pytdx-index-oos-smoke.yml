@@ -1,0 +1,83 @@
+name: pytdx-index-oos-smoke
+
+on:
+  push:
+    branches: [ market-data-v13 ]
+    paths:
+      - '.github/workflows/pytdx-index-oos-smoke.yml'
+  workflow_dispatch:
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Probe raw PyTDX Shanghai index 5m history
+        run: |
+          pip -q install pytdx pandas exchange-calendars
+          python - <<'PY'
+          from pytdx.hq import TdxHq_API
+          import pandas as pd
+          import exchange_calendars as xcals
+          try:
+              from pytdx.config.hosts import hq_hosts
+              servers=[(x[1],x[2]) for x in hq_hosts]
+          except Exception:
+              servers=[]
+          servers += [
+            ('119.97.185.59',7709),('124.70.133.119',7709),('116.205.183.150',7709),
+            ('123.60.73.44',7709),('116.205.163.254',7709),('121.36.225.169',7709),
+            ('123.60.70.228',7709),('124.71.9.153',7709),('110.41.147.114',7709),('124.71.187.122',7709)
+          ]
+          # de-duplicate while preserving order
+          servers=list(dict.fromkeys(servers))
+          api=None
+          for ip,port in servers:
+              a=None
+              try:
+                  a=TdxHq_API(heartbeat=False,auto_retry=False,raise_exception=True)
+                  if not a.connect(ip,port,time_out=2):
+                      continue
+                  rows=a.get_index_bars(0,1,'000001',0,10) or []
+                  if len(rows) >= 5:
+                      test=a.to_df(rows)
+                      if 'datetime' in test.columns and test['datetime'].notna().any():
+                          print('INDEX_SERVER_OK',ip,port,'test_rows',len(rows),'range',test.iloc[0]['datetime'],test.iloc[-1]['datetime'])
+                          api=a; break
+                  print('INDEX_SERVER_BAD',ip,port,'rows',len(rows))
+              except Exception as e:
+                  print('INDEX_SERVER_FAIL',ip,port,repr(e))
+              if a is not None:
+                  try: a.disconnect()
+                  except Exception: pass
+          if api is None: raise SystemExit('NO_WORKING_INDEX_SERVER')
+          try:
+              parts=[]
+              for page in range(8):
+                  start=page*800
+                  rows=api.get_index_bars(0,1,'000001',start,800) or []
+                  print('PAGE',page,'rows',len(rows))
+                  if not rows: break
+                  x=api.to_df(rows)
+                  print('RANGE',x.iloc[0]['datetime'],x.iloc[-1]['datetime'])
+                  parts.append(x)
+                  ts=pd.to_datetime(x['datetime'],errors='coerce')
+                  if ts.min() <= pd.Timestamp('2026-05-06 09:35'): break
+              if not parts: raise SystemExit('NO_INDEX_ROWS')
+              z=pd.concat(parts,ignore_index=True); z['ts']=pd.to_datetime(z['datetime'],errors='coerce')
+              z=z.dropna(subset=['ts']).drop_duplicates('ts').sort_values('ts')
+              z=z[(z.ts>=pd.Timestamp('2026-05-01'))&(z.ts<pd.Timestamp('2026-07-01'))]
+              counts=z.groupby(z.ts.dt.normalize()).size()
+              sessions=xcals.get_calendar('XSHG').sessions_in_range(pd.Timestamp('2026-05-01'),pd.Timestamp('2026-06-30'))
+              expected=set(pd.DatetimeIndex(sessions).tz_localize(None).normalize())
+              got=set(z.ts.dt.normalize())
+              print('FINAL rows',len(z),'days',len(got),'minmax',counts.min() if len(counts) else None,counts.max() if len(counts) else None,'missing',len(expected-got),'min',z.ts.min(),'max',z.ts.max())
+              if len(z)!=1872 or len(got)!=39 or counts.min()!=48 or counts.max()!=48 or got!=expected:
+                  raise SystemExit('INDEX_NOT_EXACT_39x48')
+              print('PYTDX_INDEX_EXACT_39x48_OK')
+          finally:
+              api.disconnect()
+          PY

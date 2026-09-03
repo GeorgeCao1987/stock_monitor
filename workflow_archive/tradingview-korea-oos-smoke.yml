@@ -1,0 +1,62 @@
+name: tradingview-korea-oos-smoke
+
+on:
+  push:
+    branches: [ market-data-v13 ]
+    paths:
+      - '.github/workflows/tradingview-korea-oos-smoke.yml'
+  workflow_dispatch:
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Probe TradingView KRX 5m historical count
+        run: |
+          npm init -y >/dev/null 2>&1
+          npm install @ch99q/twc ws >/dev/null 2>&1
+          cat > tv-smoke.mjs <<'JS'
+          import { createSession, createChart, createSeries } from '@ch99q/twc';
+          const tests = [
+            ['005930','KRX','Samsung'],
+            ['000660','KRX','SKHynix'],
+            ['KOSPI','KRX','KOSPI'],
+          ];
+          for (const [symbol, exchange, name] of tests) {
+            const session = await createSession();
+            let series = null;
+            try {
+              const chart = await createChart(session);
+              const resolved = await chart.resolve(symbol, exchange);
+              console.log('RESOLVED', name, resolved?.name || resolved?.description || symbol);
+              series = await createSeries(session, chart, resolved, '5', 8000);
+              const hist = series.history || [];
+              console.log('HISTORY', name, hist.length);
+              if (hist.length) {
+                const ts = hist.map(x => Array.isArray(x) ? x[0] : (x.time ?? x.timestamp ?? x[0])).filter(Number.isFinite);
+                console.log('RANGE', name, new Date(Math.min(...ts)*1000).toISOString(), new Date(Math.max(...ts)*1000).toISOString());
+                const start = Date.parse('2026-05-01T00:00:00+09:00')/1000;
+                const end = Date.parse('2026-07-01T00:00:00+09:00')/1000;
+                const oos = hist.filter(x => {
+                  const t = Array.isArray(x) ? x[0] : (x.time ?? x.timestamp ?? x[0]);
+                  return Number.isFinite(t) && t >= start && t < end;
+                });
+                console.log('OOS_COUNT', name, oos.length);
+                if (oos.length) {
+                  console.log('OOS_FIRST', name, JSON.stringify(oos[0]));
+                  console.log('OOS_LAST', name, JSON.stringify(oos[oos.length-1]));
+                }
+              }
+            } catch (e) {
+              console.log('FAIL',name,e?.stack || String(e));
+            } finally {
+              try { if (series) await series.close(); } catch {}
+              try { await session.close(); } catch {}
+            }
+          }
+          JS
+          node ./tv-smoke.mjs

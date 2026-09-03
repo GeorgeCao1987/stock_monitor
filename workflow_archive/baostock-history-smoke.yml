@@ -1,0 +1,50 @@
+name: baostock-history-smoke
+
+on:
+  push:
+    branches: [ market-data-v13 ]
+    paths:
+      - '.github/workflows/baostock-history-smoke.yml'
+  workflow_dispatch:
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Test Baostock 002916 May-Jun 5m history
+        run: |
+          pip -q install baostock pandas exchange-calendars
+          timeout 30s python - <<'PY'
+          import baostock as bs
+          import pandas as pd
+          import exchange_calendars as xcals
+
+          lg=bs.login()
+          print('login',lg.error_code,lg.error_msg)
+          if lg.error_code!='0': raise SystemExit('login failed')
+          try:
+              rs=bs.query_history_k_data_plus(
+                  'sz.002916','date,time,open,high,low,close,volume,amount',
+                  start_date='2026-05-01',end_date='2026-06-30',frequency='5',adjustflag='3')
+              print('query',rs.error_code,rs.error_msg)
+              rows=[]
+              while rs.error_code=='0' and rs.next(): rows.append(rs.get_row_data())
+          finally:
+              bs.logout()
+          print('rows',len(rows))
+          if not rows: raise SystemExit('no rows')
+          ts=pd.to_datetime([r[1][:14] for r in rows],format='%Y%m%d%H%M%S')
+          counts=pd.Series(1,index=ts).groupby(ts.normalize()).sum()
+          cal=xcals.get_calendar('XSHG')
+          sessions=cal.sessions_in_range(pd.Timestamp('2026-05-01'),pd.Timestamp('2026-06-30'))
+          expected=set(pd.DatetimeIndex(sessions).tz_localize(None).normalize())
+          got=set(ts.normalize())
+          print('days',len(got),'minmax',counts.min(),counts.max(),'missing',len(expected-got),'min',ts.min(),'max',ts.max())
+          if len(rows)!=1872 or len(got)!=39 or counts.min()!=48 or counts.max()!=48 or got!=expected:
+              raise SystemExit('not exact 39x48')
+          print('BAOSTOCK_EXACT_39x48_OK')
+          PY
