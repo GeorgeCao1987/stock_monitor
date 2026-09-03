@@ -1,11 +1,13 @@
 from pathlib import Path
 import json
+from typing import Optional
 import numpy as np
 import pandas as pd
 
 import event_engine_v14 as e14
 from opening_regime_diagnostics import add_opening_regime
 from opening_extreme_forecast_v18 import add_extreme_forecast
+from external_event_context import event_context_schema
 
 BASE = Path(__file__).resolve().parent
 RESULTS = BASE / "results"
@@ -39,17 +41,22 @@ def _event_metrics(z: pd.DataFrame, total_days: int) -> dict:
     return out
 
 
-def build():
+def build(event_context: Optional[pd.DataFrame] = None):
     x = e14.build_scored_frame()
     x, daily = add_opening_regime(x)
-    daily = add_extreme_forecast(daily)
+    daily = add_extreme_forecast(daily, event_context=event_context)
     events = e14.build_events(x)
 
     z = events.copy()
     z["day"] = pd.to_datetime(z.ts).dt.date
     ctx = x[["ts", "bar_no"]].drop_duplicates("ts")
     z = z.merge(ctx, on="ts", how="left")
-    d = daily[["day", "high_bar_no", "low_bar_no", "forecast"]].copy()
+    d = daily[[
+        "day", "high_bar_no", "low_bar_no", "forecast",
+        "event_bucket", "event_effective_score", "event_context_available",
+        "event_direction", "event_strength", "event_scope", "event_freshness",
+        "event_confidence", "affected_chain", "event_source_count", "event_active",
+    ]].copy()
     z = z.merge(d, on="day", how="left")
     z["daily_extreme_bar_no"] = np.where(z.side == "HIGH", z.high_bar_no, z.low_bar_no)
     z["lag_from_daily_extreme"] = z.bar_no - z.daily_extreme_bar_no
@@ -58,7 +65,10 @@ def build():
 
 
 def main():
-    x, daily, events = build()
+    # Historical realtime-event snapshots are injected by a dedicated backtest.
+    # None is the price-only baseline and must remain distinguishable from a
+    # genuinely neutral-news day.
+    x, daily, events = build(event_context=None)
     total_days = int(len(daily))
     report = {
         "version": "stage-extreme-replay-v19",
@@ -72,6 +82,8 @@ def main():
             "LOW_PRIMARY": "STRUCTURE_CONFIRM",
             "status": "diagnostic_only_until_holdout_validation",
         },
+        "external_realtime_event_context": event_context_schema(),
+        "event_context_available_days": int(daily.event_context_available.sum()),
     }
     for side in ["HIGH", "LOW"]:
         report["by_side_stage"][side] = {}
@@ -79,13 +91,24 @@ def main():
             q = events[(events.side == side) & (events.event_type == stage)].copy()
             report["by_side_stage"][side][stage] = _event_metrics(q, total_days)
 
-    # Forecast-conditioned view is intentionally descriptive; no filter is fitted here.
+    # Opening forecast-conditioned view is descriptive; no filter is fitted here.
     report["by_forecast"] = {}
     for side, stage in [("HIGH", "WATCH_START"), ("LOW", "STRUCTURE_CONFIRM")]:
         q = events[(events.side == side) & (events.event_type == stage) & (events.bar_no >= 5)].copy()
         report["by_forecast"][f"{side}_{stage}"] = {
             state: _event_metrics(q[q.forecast == state], total_days)
             for state in ["HIGH_AHEAD", "LOW_AHEAD", "UNCERTAIN"]
+        }
+
+    # External realtime-message context is a separate condition.  This is only
+    # a stratified diagnostic until historical event snapshots exist and pass
+    # cross-period + untouched-holdout incremental validation.
+    report["by_external_event_context"] = {}
+    for side, stage in [("HIGH", "WATCH_START"), ("LOW", "STRUCTURE_CONFIRM")]:
+        q = events[(events.side == side) & (events.event_type == stage)].copy()
+        report["by_external_event_context"][f"{side}_{stage}"] = {
+            bucket: _event_metrics(q[q.event_bucket == bucket], total_days)
+            for bucket in ["POSITIVE", "NEGATIVE", "NEUTRAL"]
         }
 
     events.to_csv(RESULTS / "stage_extreme_events_v19.csv", index=False)
