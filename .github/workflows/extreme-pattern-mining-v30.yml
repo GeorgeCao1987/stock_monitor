@@ -1,0 +1,40 @@
+name: extreme-pattern-mining-v30
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - 'market_data/extreme_pattern_mining_v30.py'
+      - '.github/workflows/extreme-pattern-mining-v30.yml'
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  mine-patterns:
+    runs-on: ubuntu-latest
+    timeout-minutes: 28
+    env:
+      MARKET_START_DATE: '2025-12-01'
+      MARKET_END_DATE: '2026-08-31'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: pip
+          cache-dependency-path: market_data/requirements.txt
+      - run: |
+          pip install -r market_data/requirements.txt
+          pip install pytdx scikit-learn==1.7.2
+      - name: Collect complete data and mine all 2026 Jan-Aug extreme patterns
+        working-directory: market_data
+        run: |
+          rm -rf data results && mkdir -p data results
+          python oos_core_collect.py
+          python extreme_pattern_mining_v30.py
+      - uses: actions/upload-artifact@v4
+        with:
+          name: extreme-pattern-mining-v30-${{ github.run_id }}
+          path: market_data/results/
