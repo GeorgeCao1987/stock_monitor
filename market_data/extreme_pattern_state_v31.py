@@ -110,7 +110,7 @@ def formation_metrics(z: pd.DataFrame, side: str, threshold: float):
         pcol, target, zone = "p_top_forming_15m", "top_forming_15m", "top_zone"
     else:
         pcol, target, zone = "p_bottom_forming_15m", "bottom_forming_15m", "bottom_zone"
-    base = z[zone & (z.bar_idx >= 3) & (z.bar_idx <= 44)].copy()
+    base = z[z[zone].fillna(False) & (z.bar_idx >= 3) & (z.bar_idx <= 44)].copy()
     q = episode_starts(base, base[pcol] >= threshold)
     return {
         "signals": int(len(q)),
@@ -212,8 +212,6 @@ def evaluate_state_machine(z: pd.DataFrame, top_watch: dict, bottom_watch: dict)
     x["top_exec_tol"] = np.minimum(0.008, np.maximum(0.004, 0.50 * atr))
     x["bottom_exec_tol"] = np.minimum(0.012, np.maximum(0.006, 0.75 * atr))
 
-    # Pattern-mined transition: final tops are often preceded by a last impulse,
-    # then the first reliable rollover is recent new-high -> no new-high + VWAP slope down.
     x["reverse_execute_v31"] = (
         (x.bar_idx >= 3) & (x.bar_idx <= MAX_EXEC_BAR)
         & x.recent_high_no_new
@@ -222,7 +220,6 @@ def evaluate_state_machine(z: pd.DataFrame, top_watch: dict, bottom_watch: dict)
         & x.top_watch_recent
     )
 
-    # Bottom transition remains a confirmation state, not automatically a buy.
     x["positive_confirm_v31"] = (
         (x.bar_idx >= 3) & (x.bar_idx <= MAX_EXEC_BAR)
         & x.recent_low_no_new
@@ -230,7 +227,6 @@ def evaluate_state_machine(z: pd.DataFrame, top_watch: dict, bottom_watch: dict)
         & (x.pos_in_range > 0.055)
         & x.bottom_watch_recent
     )
-    # A stricter executable diagnostic requires current-bar recovery and VWAP slope up.
     x["positive_execute_v31"] = (
         x.positive_confirm_v31
         & (x.close_pos_bar >= 0.55)
