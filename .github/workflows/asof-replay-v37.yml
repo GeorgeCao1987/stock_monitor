@@ -23,11 +23,16 @@ jobs:
         run: pip install -r market_data/requirements.txt pytdx scikit-learn
 
       - name: Load replay request
-        shell: bash
         run: |
-          echo "ASOF_SYMBOL=$(python -c \"import json;print(json.load(open('market_data/asof_replay_request.json'))['证券代码'])\")" >> "$GITHUB_ENV"
-          echo "ASOF_DATE=$(python -c \"import json;print(json.load(open('market_data/asof_replay_request.json'))['日期'])\")" >> "$GITHUB_ENV"
-          echo "ASOF_TIME=$(python -c \"import json;print(json.load(open('market_data/asof_replay_request.json'))['时间'])\")" >> "$GITHUB_ENV"
+          python - <<'PY'
+          import json, os
+          with open('market_data/asof_replay_request.json', encoding='utf-8') as f:
+              req = json.load(f)
+          with open(os.environ['GITHUB_ENV'], 'a', encoding='utf-8') as f:
+              f.write(f"ASOF_SYMBOL={req['证券代码']}\n")
+              f.write(f"ASOF_DATE={req['日期']}\n")
+              f.write(f"ASOF_TIME={req['时间']}\n")
+          PY
 
       - name: Strict as-of replay
         run: python market_data/asof_replay_v37.py
