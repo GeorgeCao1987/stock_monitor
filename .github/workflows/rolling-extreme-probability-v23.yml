@@ -5,6 +5,7 @@ on:
   push:
     paths:
       - 'market_data/rolling_extreme_probability_v23.py'
+      - 'market_data/rolling_extreme_probability_v23_cloud.py'
       - '.github/workflows/rolling-extreme-probability-v23.yml'
 
 permissions:
@@ -33,10 +34,8 @@ jobs:
         run: |
           rm -rf data results && mkdir -p data results
           python oos_core_collect.py
-          python rolling_extreme_probability_v23.py
+          python rolling_extreme_probability_v23_cloud.py
       - uses: actions/upload-artifact@v4
         with:
           name: rolling-extreme-v23-dev-${{ github.run_id }}
           path: market_data/results/
-
-# Triggered after the V2.3 label/execution-separation correction.
