@@ -1,0 +1,6 @@
+【Stock Monitor 推送测试】
+飞书机器人连接正常性测试
+模型：V3.7
+类型：TEST
+状态：推送链路验证
+说明：收到此消息表示 GitHub Actions → 飞书 Webhook 链路已打通。
