@@ -1,0 +1,41 @@
+name: t-edge-state-machine-v27
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - 'market_data/t_edge_state_machine_v27.py'
+      - 'market_data/t_edge_state_machine_v27_cloud.py'
+      - '.github/workflows/t-edge-state-machine-v27.yml'
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  development:
+    runs-on: ubuntu-latest
+    timeout-minutes: 24
+    env:
+      MARKET_START_DATE: '2026-01-01'
+      MARKET_END_DATE: '2026-06-30'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: pip
+          cache-dependency-path: market_data/requirements.txt
+      - run: |
+          pip install -r market_data/requirements.txt
+          pip install pytdx
+      - name: Collect exact core and run frozen V2.7 development replay
+        working-directory: market_data
+        run: |
+          rm -rf data results && mkdir -p data results
+          python oos_core_collect.py
+          python t_edge_state_machine_v27_cloud.py
+      - uses: actions/upload-artifact@v4
+        with:
+          name: t-edge-state-machine-v27-dev-${{ github.run_id }}
+          path: market_data/results/
