@@ -167,11 +167,47 @@ def auc_binary(y, p):
     return float((ranks[y == 1].sum() - n1 * (n1 + 1) / 2) / (n1 * n0))
 
 
+def _signal_metrics(q: pd.DataFrame, target: str, reversal: str, residual: str) -> dict:
+    if q.empty:
+        return {
+            "signals": 0,
+            "signal_days": 0,
+            "lock_precision": None,
+            "directional_edge_rate": None,
+            "median_reversal_room": None,
+            "median_residual_wrong_way_room": None,
+            "median_reversal_to_residual_ratio": None,
+        }
+    ratio = (q[reversal] / q[residual].replace(0, np.nan)).replace([np.inf, -np.inf], np.nan)
+    return {
+        "signals": int(len(q)),
+        "signal_days": int(q.day.nunique()),
+        "lock_precision": float(q[target].mean()),
+        "directional_edge_rate": float((q[reversal] > q[residual]).mean()),
+        "median_reversal_room": float(q[reversal].median()),
+        "median_residual_wrong_way_room": float(q[residual].median()),
+        "median_reversal_to_residual_ratio": float(ratio.median()) if ratio.notna().any() else None,
+        "time_buckets": q.time_bucket.value_counts().to_dict(),
+    }
+
+
+def _episode_starts(z: pd.DataFrame, condition: pd.Series) -> pd.DataFrame:
+    """Return only false->true transitions within each trading day.
+
+    This matches live notification behavior: a persistent state across several
+    bars is one signal episode, not several independent wins.
+    """
+    q = z.copy().sort_values(["day", "ts"])
+    q["_cond"] = pd.Series(condition, index=z.index).reindex(q.index).fillna(False).astype(bool)
+    prev = q.groupby("day")["_cond"].shift(1).fillna(False)
+    return q[q._cond & (~prev)].drop(columns="_cond")
+
+
 def probability_metrics(z: pd.DataFrame, side: str) -> dict:
     target = "top_locked" if side == "TOP" else "bottom_locked"
     pcol = "p_top_locked" if side == "TOP" else "p_bottom_locked"
     near = "near_top" if side == "TOP" else "near_bottom"
-    adverse = "remaining_downside" if side == "TOP" else "remaining_upside"
+    reversal = "remaining_downside" if side == "TOP" else "remaining_upside"
     residual = "remaining_upside" if side == "TOP" else "remaining_downside"
 
     out = {
@@ -181,19 +217,13 @@ def probability_metrics(z: pd.DataFrame, side: str) -> dict:
         "auc": auc_binary(z[target], z[pcol]) if len(z) else None,
         "thresholds": {},
     }
-    for th in [0.60, 0.70, 0.80]:
-        q = z[(z[pcol] >= th) & z[near]].copy()
+    for th in [0.50, 0.60, 0.70, 0.80]:
+        condition = (z[pcol] >= th) & z[near]
+        bar_q = z[condition].copy()
+        episode_q = _episode_starts(z, condition)
         out["thresholds"][str(th)] = {
-            "signals": int(len(q)),
-            "signal_days": int(q.day.nunique()) if len(q) else 0,
-            "signals_per_signal_day": float(len(q) / q.day.nunique()) if len(q) and q.day.nunique() else None,
-            "lock_precision": float(q[target].mean()) if len(q) else None,
-            "directional_edge_rate": float((q[adverse] > q[residual]).mean()) if len(q) else None,
-            "median_reversal_room": float(q[adverse].median()) if len(q) else None,
-            "median_residual_wrong_way_room": float(q[residual].median()) if len(q) else None,
-            "median_reversal_to_residual_ratio": float(
-                (q[adverse] / q[residual].replace(0, np.nan)).replace([np.inf, -np.inf], np.nan).median()
-            ) if len(q) else None,
+            "bar_level_descriptive": _signal_metrics(bar_q, target, reversal, residual),
+            "episode_start_primary": _signal_metrics(episode_q, target, reversal, residual),
         }
     return out
 
@@ -220,8 +250,6 @@ def main():
     top_val = calibrate(dev, val0, "TOP")
     bot_val = calibrate(dev, val0, "BOTTOM")
 
-    # Merge calibrated probabilities by timestamp; both are generated from the
-    # same validation rows but independently calibrated.
     val = top_val.copy()
     for c in ["p_bottom_locked", "p_bottom_locked_source", "p_bottom_locked_calibration_n"]:
         val[c] = bot_val[c].values
@@ -243,6 +271,10 @@ def main():
             "tradeable_guard": "signal-time close must still be within the same tolerance of the running extreme",
             "future_data": "used for labels/evaluation only",
         },
+        "evaluation_note": (
+            "Primary live-signal metrics use episode starts (false->true threshold transitions). "
+            "Persistent signals across consecutive bars are not counted as independent wins."
+        ),
         "data": {
             "trading_days": int(z.day.nunique()),
             "development": "2026-01-01..2026-06-30",
