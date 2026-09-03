@@ -1,0 +1,41 @@
+name: extreme-pattern-adaptive-v33
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - 'market_data/extreme_pattern_adaptive_v33.py'
+      - 'market_data/extreme_pattern_adaptive_v33_cloud.py'
+      - '.github/workflows/extreme-pattern-adaptive-v33.yml'
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  adaptive-backtest:
+    runs-on: ubuntu-latest
+    timeout-minutes: 32
+    env:
+      MARKET_START_DATE: '2024-12-01'
+      MARKET_END_DATE: '2026-08-31'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: pip
+          cache-dependency-path: market_data/requirements.txt
+      - run: |
+          pip install -r market_data/requirements.txt
+          pip install pytdx scikit-learn==1.7.2
+      - name: Collect exact history and run V3.3 adaptive backtest
+        working-directory: market_data
+        run: |
+          rm -rf data results && mkdir -p data results
+          python oos_core_collect.py
+          python extreme_pattern_adaptive_v33_cloud.py
+      - uses: actions/upload-artifact@v4
+        with:
+          name: extreme-pattern-adaptive-v33-${{ github.run_id }}
+          path: market_data/results/
