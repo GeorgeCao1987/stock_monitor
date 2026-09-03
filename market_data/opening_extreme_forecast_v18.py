@@ -5,14 +5,14 @@ import pandas as pd
 
 import event_engine_v14 as e14
 from opening_regime_diagnostics import add_opening_regime, OPEN_BARS
-from external_event_context import attach_daily_event_context, event_context_schema
+from external_event_context import attach_daily_event_context, event_context_schema, load_raw_event_file
 
 BASE = Path(__file__).resolve().parent
 RESULTS = BASE / "results"
 RESULTS.mkdir(exist_ok=True)
 
 # Frozen after cross-period development analysis on 2026-01..08.
-# HIGH is intentionally stricter than LOW.  The objective is not final close
+# HIGH is intentionally stricter than LOW. The objective is not final close
 # direction; it is whether the corresponding daily extreme is still ahead
 # after the 10:00 snapshot.
 HIGH_UP_VOTES = 4
@@ -37,7 +37,7 @@ def add_extreme_forecast(daily: pd.DataFrame, event_context: Optional[pd.DataFra
     ]
 
     # External realtime messages are a separate condition from overseas price
-    # priors.  They are attached here for diagnostics/stratification only.
+    # priors. They are attached here for diagnostics/stratification only.
     # V1.8 frozen vote thresholds remain unchanged until incremental backtests
     # prove a stable benefit from the event layer.
     z = attach_daily_event_context(z, event_context)
@@ -66,9 +66,8 @@ def state_metrics(z: pd.DataFrame) -> dict:
 def main():
     x = e14.build_scored_frame()
     _, daily = add_opening_regime(x)
-    # Historical realtime-event snapshots are injected by callers/backtests.
-    # None means the price-only V1.8 baseline and is explicitly marked unavailable.
-    daily = add_extreme_forecast(daily, event_context=None)
+    raw_events = load_raw_event_file()
+    daily = add_extreme_forecast(daily, event_context=raw_events)
 
     states = {
         state: state_metrics(daily[daily.forecast == state])
@@ -90,6 +89,7 @@ def main():
             "no_future_leakage": True,
         },
         "external_realtime_event_context": event_context_schema(),
+        "raw_external_event_rows": int(len(raw_events)) if raw_events is not None else 0,
         "event_context_available_days": int(daily.event_context_available.sum()),
         "event_context_by_bucket": event_states,
         "trading_days": int(len(daily)),
@@ -102,7 +102,8 @@ def main():
         "note": (
             "Daily high/low locations are future labels used only for evaluation. "
             "The forecast itself uses the completed opening snapshot only. "
-            "External news/event context is recorded separately and currently has zero model weight until incremental validation."
+            "External news/event context uses only headlines already public by 10:00, "
+            "is recorded separately, and currently has zero model weight until incremental validation."
         ),
     }
     daily.to_csv(RESULTS / "opening_extreme_forecast_v18.csv", index=False)
