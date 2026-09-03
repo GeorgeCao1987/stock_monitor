@@ -32,26 +32,21 @@ PERIODS = [
 THRESHOLDS = [0.50, 0.55, 0.60, 0.65, 0.70, 0.75]
 
 FEATURES = [
-    # time / day-state
     "bar_idx", "time_norm", "is_late_am", "is_pm",
     "open15_target_ret", "open15_pcb_ret", "open15_index_ret", "open15_breadth",
     "running_range_pct", "running_range_atr",
-    # target state
     "ret_from_open", "ret1", "ret3", "ret6", "ret3_accel",
     "dist_vwap", "dist_vwap_chg1", "dist_vwap_chg3",
     "pos_in_range", "close_pos_bar", "gap_to_running_high", "gap_to_running_low",
     "dist_to_high_atr", "dist_to_low_atr", "atr_pct",
     "vol_ratio", "amount_ratio", "body_shrink", "upper_wick_ratio", "lower_wick_ratio",
-    # market / PCB regime
     "pcb_ret", "index_ret", "pcb_rel", "pcb_rel_chg3", "pcb_up_breadth", "pcb_breadth_chg3",
     "target_rel_pcb", "target_rel_index",
     "trend_down_score", "trend_up_score", "bottom_turn_score", "top_roll_score",
-    # nonlinear depth / extension
     "oversold_1", "oversold_2", "oversold_3", "oversold_4",
     "overbought_1", "overbought_2", "overbought_3", "overbought_4",
     "below_vwap_05", "below_vwap_10", "below_vwap_20",
     "above_vwap_05", "above_vwap_10", "above_vwap_20",
-    # existing asymmetric structure scores
     "low_score", "high_score", "bottom_v23_score", "top_v23_score",
     "new_low", "new_high", "no_new_low_1", "no_new_high_1",
     "failed_breakdown", "failed_breakout", "bottom_structure_break", "top_structure_break",
@@ -77,6 +72,11 @@ def _n(s):
 
 
 def add_first_passage(z: pd.DataFrame) -> pd.DataFrame:
+    """Create scoring-only execution labels on the FULL 48-bar day.
+
+    This function must run before filtering action bars; otherwise later bars
+    needed by the 60-minute scoring window would be truncated.
+    """
     x = z.copy().sort_values(["day", "ts"]).reset_index(drop=True)
     p_out, r_out = [], []
     for i, r in x.iterrows():
@@ -106,13 +106,15 @@ def add_first_passage(z: pd.DataFrame) -> pd.DataFrame:
 
 
 def add_regime_features(z: pd.DataFrame) -> pd.DataFrame:
+    """Past-only regime features built on the full intraday chronology."""
     x = z.copy().sort_values(["day", "ts"]).reset_index(drop=True)
     day = x.day
     x["time_norm"] = x.bar_idx / 47.0
     x["is_late_am"] = x.time_phase.eq("LATE_AM_1035_1130").astype(float)
     x["is_pm"] = x.time_phase.isin(["EARLY_PM_1305_1400", "LATE_PM_1405_1440"]).astype(float)
 
-    # Opening regime snapshot: bar 2 (~09:45) is already known for all eligible bars (bar>=3).
+    # bar 2 is ~09:45. Because this is computed BEFORE eligible-bar filtering,
+    # every decision bar >=3 uses only an already-completed opening snapshot.
     for src, dst in [
         ("ret_from_open", "open15_target_ret"),
         ("pcb_ret", "open15_pcb_ret"),
@@ -126,7 +128,6 @@ def add_regime_features(z: pd.DataFrame) -> pd.DataFrame:
     x["target_rel_pcb"] = _n(x.ret_from_open) - _n(x.pcb_ret)
     x["target_rel_index"] = _n(x.ret_from_open) - _n(x.index_ret)
 
-    # Observable persistence vs reversal regime. These are deliberately past-only.
     x["trend_down_score"] = (
         (_n(x.ret1) < -0.005).astype(float)
         + (_n(x.ret3) < -0.012).astype(float)
@@ -173,7 +174,9 @@ def add_regime_features(z: pd.DataFrame) -> pd.DataFrame:
 def build_frame() -> pd.DataFrame:
     x = e14.build_scored_frame()
     z = v23.add_v23_state(x)
-    z = z[(z.bar_idx >= 3) & (z.bar_idx <= MAX_ACTION_BAR)].copy()
+
+    # CRITICAL ORDER: labels and opening-regime snapshot are built from the
+    # complete 48-bar day. Only after that do we restrict decision times.
     z = add_first_passage(z)
     z["positive_opportunity"] = (
         (z.remaining_upside_from_close >= TARGET_MOVE)
@@ -184,6 +187,7 @@ def build_frame() -> pd.DataFrame:
         & (z.remaining_downside_from_close > z.remaining_upside_from_close)
     ).astype(int)
     z = add_regime_features(z)
+    z = z[(z.bar_idx >= 3) & (z.bar_idx <= MAX_ACTION_BAR)].copy()
     return z
 
 
@@ -328,6 +332,7 @@ def main():
         "development_only": "2025-05-01..2026-08-31, all periods already consumed by earlier model development/holdouts",
         "new_untouched_holdout_reserved": "2025-03-01..2025-04-30; do not inspect unless a V2.8 target passes freeze policy",
         "model": "HistGradientBoostingClassifier with explicit opening/day/trend/reversal regime features",
+        "chronology_fix": "opening snapshot and first-passage labels are built on full 48-bar days before eligible-bar filtering",
         "future_leakage": False,
         "max_action_bar": MAX_ACTION_BAR,
         "folds": fold_report,
