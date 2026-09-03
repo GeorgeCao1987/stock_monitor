@@ -1,4 +1,4 @@
-name: Migrate stock model from microservice
+name: Archive source stock workflows
 
 on:
   push:
@@ -22,20 +22,20 @@ jobs:
         run: |
           git clone --depth 1 --branch market-data-v13 https://github.com/GeorgeCao1987/microservice.git /tmp/source
 
-      - name: Copy stock model code and strategy
+      - name: Archive source workflows
         run: |
-          rm -rf market_data
-          cp -a /tmp/source/market_data ./market_data
-          cp /tmp/source/STRATEGY.md ./STRATEGY.md
+          rm -rf workflow_archive
+          mkdir -p workflow_archive
+          cp /tmp/source/.github/workflows/*.yml ./workflow_archive/
 
-      - name: Commit migrated model
+      - name: Commit workflow archive
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add market_data STRATEGY.md
+          git add workflow_archive
           if git diff --cached --quiet; then
-            echo "No migration changes"
+            echo "No archive changes"
             exit 0
           fi
-          git commit -m "chore: migrate intraday stock model from microservice"
+          git commit -m "chore: archive migrated stock model workflows"
           git push origin HEAD:main
