@@ -18,7 +18,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 40
     env:
-      MARKET_START_DATE: '2024-08-01'
+      MARKET_START_DATE: '2024-08-14'
       MARKET_END_DATE: '2026-08-31'
     steps:
       - uses: actions/checkout@v4
