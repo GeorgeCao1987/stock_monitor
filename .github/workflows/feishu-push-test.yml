@@ -1,0 +1,26 @@
+name: feishu-push-test
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'market_data/feishu_test_message.txt'
+  workflow_dispatch:
+
+jobs:
+  push-test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Send Feishu message
+        env:
+          FEISHU_WEBHOOK_URL: ${{ secrets.FEISHU_WEBHOOK_URL }}
+          FEISHU_MESSAGE_FILE: market_data/feishu_test_message.txt
+        run: python market_data/feishu_notifier.py
