@@ -26,93 +26,76 @@ def load_message() -> str:
             raise RuntimeError(f"message file does not exist: {path}")
         return path.read_text(encoding="utf-8").strip()
     now = datetime.now(ZoneInfo("Asia/Shanghai")).strftime("%Y-%m-%d %H:%M:%S")
-    return f"【Stock Monitor 推送测试】\n飞书机器人连接正常\n模型版本：V3.7\n消息类型：测试\n时间：{now}\n当前状态：推送链路验证"
+    return f"【盘中监控】\n时间：{now}\n状态：连接正常"
 
 
 def build_signal_card(data: dict) -> dict:
-    title = str(data.get("卡片标题", "盘中T交易监控"))
+    title = str(data.get("卡片标题", "盘中监控"))
     header_color = str(data.get("标题颜色", "blue"))
 
     def value(key: str, default: str = "—") -> str:
         v = data.get(key, default)
         return default if v is None or v == "" else str(v)
 
+    # 默认采用极简卡片：时间、现价、顶部、底部、结论。
+    compact_keys = ["时间", "现价", "顶部", "底部"]
+    if any(k in data for k in compact_keys):
+        fields = [
+            ("时间", value("时间")),
+            ("现价", value("现价")),
+            ("顶部", value("顶部")),
+            ("底部", value("底部")),
+        ]
+        field_nodes = [
+            {
+                "is_short": True,
+                "text": {"tag": "lark_md", "content": f"**{name}**\n{val}"},
+            }
+            for name, val in fields
+        ]
+        elements = [
+            {"tag": "div", "fields": field_nodes},
+            {
+                "tag": "div",
+                "text": {"tag": "lark_md", "content": f"**结论**  {value('结论')}"},
+            },
+        ]
+        return {
+            "config": {"wide_screen_mode": True, "enable_forward": True},
+            "header": {
+                "template": header_color,
+                "title": {"tag": "plain_text", "content": title},
+            },
+            "elements": elements,
+        }
+
+    # 兼容旧的详细卡片数据，但后续实盘默认不使用。
     fields = [
         ("证券名称", value("证券名称")),
-        ("证券代码", value("证券代码")),
-        ("模拟时间", value("模拟时间")),
         ("当前价格", value("当前价格")),
         ("顶部锁定概率", value("顶部锁定概率")),
         ("底部锁定概率", value("底部锁定概率")),
-        ("距日内高点", value("距日内高点")),
-        ("距日内低点", value("距日内低点")),
-        ("反T交易价值", value("反T交易价值")),
-        ("正T交易价值", value("正T交易价值")),
         ("当前状态", value("当前状态")),
-        ("信号级别", value("信号级别")),
     ]
-
     field_nodes = [
         {
             "is_short": True,
-            "text": {
-                "tag": "lark_md",
-                "content": f"**{name}**\n{val}",
-            },
+            "text": {"tag": "lark_md", "content": f"**{name}**\n{val}"},
         }
         for name, val in fields
     ]
-
     elements = [
+        {"tag": "div", "fields": field_nodes},
         {
             "tag": "div",
-            "fields": field_nodes,
-        },
-        {"tag": "hr"},
-        {
-            "tag": "div",
-            "text": {
-                "tag": "lark_md",
-                "content": f"**操作结论**\n{value('操作结论')}",
-            },
-        },
-        {
-            "tag": "div",
-            "text": {
-                "tag": "lark_md",
-                "content": f"**关键证据**\n{value('关键证据')}",
-            },
-        },
-        {
-            "tag": "div",
-            "text": {
-                "tag": "lark_md",
-                "content": f"**失效条件**\n{value('失效条件')}",
-            },
-        },
-        {"tag": "hr"},
-        {
-            "tag": "note",
-            "elements": [
-                {
-                    "tag": "plain_text",
-                    "content": f"{value('数据性质', '实盘')} ｜ 模型版本：{value('模型版本', 'V3.7')} ｜ 数据粒度：{value('数据粒度', '5分钟')}",
-                }
-            ],
+            "text": {"tag": "lark_md", "content": f"**结论**  {value('操作结论')}"},
         },
     ]
-
     return {
-        "config": {
-            "wide_screen_mode": True,
-            "enable_forward": True,
-        },
+        "config": {"wide_screen_mode": True, "enable_forward": True},
         "header": {
             "template": header_color,
-            "title": {
-                "tag": "plain_text",
-                "content": title,
-            },
+            "title": {"tag": "plain_text", "content": title},
         },
         "elements": elements,
     }
