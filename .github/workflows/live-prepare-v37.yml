@@ -9,6 +9,7 @@ on:
   push:
     paths:
       - 'market_data/prepare_live_model_v37.py'
+      - 'market_data/live_prepare_trigger.txt'
       - '.github/workflows/live-prepare-v37.yml'
 
 permissions:
