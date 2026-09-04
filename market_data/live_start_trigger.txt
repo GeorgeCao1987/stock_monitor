@@ -1,1 +1,1 @@
-2026-09-04 restart immediate latest completed bar
+2026-09-04 restart with prepared cache and immediate latest-bar scoring
