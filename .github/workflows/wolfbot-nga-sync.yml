@@ -94,6 +94,10 @@ jobs:
         if: steps.credential.outputs.configured == 'true'
         run: python wolfbot/apply_semantic_review_v110.py
 
+      - name: Update current knowledge markdown
+        if: steps.credential.outputs.configured == 'true'
+        run: python wolfbot/update_current_md_v110.py
+
       - name: Commit knowledge delta to wolfbot branch
         if: steps.credential.outputs.configured == 'true'
         run: |
