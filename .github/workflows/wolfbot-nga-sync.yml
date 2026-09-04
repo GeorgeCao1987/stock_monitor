@@ -2,6 +2,9 @@ name: WolfBot NGA Knowledge Sync
 
 on:
   workflow_dispatch:
+  push:
+    paths:
+      - ".github/workflows/wolfbot-nga-sync.yml"
 
 permissions:
   contents: write
@@ -50,9 +53,11 @@ jobs:
         env:
           NGA_COOKIE: ${{ secrets.NGA_COOKIE }}
           NGA_UID: "150058"
-          NGA_TID: "45974302"
+          # User-provided current thread; authorid=150058 means only 阿狼's posts.
+          NGA_TID: "47288722"
           NGA_SYNC_SLEEP: "1.0"
-          NGA_SYNC_MAX_PAGES: "12"
+          # First pass must be able to walk the complete author-only thread through today.
+          NGA_SYNC_MAX_PAGES: "5000"
           NGA_BOOTSTRAP_MAX_PAGES: "5000"
           RULE_LLM_API_KEY: ${{ secrets.RULE_LLM_API_KEY }}
           RULE_LLM_BASE_URL: ${{ secrets.RULE_LLM_BASE_URL }}
