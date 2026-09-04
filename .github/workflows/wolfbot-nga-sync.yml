@@ -1,3 +1,4 @@
+# trigger: cloud-endpoint-fallback-v2
 name: WolfBot NGA Knowledge Sync
 
 on:
