@@ -27,6 +27,7 @@ NAME = "深南电路" if SYMBOL == "002916" else SYMBOL
 PUSH_DELTA = float(os.getenv("LIVE_PUSH_DELTA", "0.15"))
 BAR_SETTLE_SECONDS = int(os.getenv("LIVE_BAR_SETTLE_SECONDS", "25"))
 MODEL_BUNDLE = BASE / "live_cache" / "model_bundle.joblib"
+MAX_COMMON_LAG_MINUTES = int(os.getenv("LIVE_MAX_COMMON_LAG_MINUTES", "5"))
 
 PREFERRED = [("202.108.253.139", 80)]
 
@@ -63,8 +64,27 @@ def parse_rows(api, rows, target_date, is_index=False):
     }).dropna(subset=["ts", "close"])
 
 
-def fetch_tick(cutoff: pd.Timestamp):
-    date_s = cutoff.strftime("%Y-%m-%d")
+def _latest_common_cutoff(series_map, requested_cutoff):
+    timestamp_sets = []
+    for df in series_map.values():
+        q = df[df.ts <= requested_cutoff]
+        if q.empty:
+            return None
+        timestamp_sets.append(set(pd.to_datetime(q.ts)))
+    common = set.intersection(*timestamp_sets) if timestamp_sets else set()
+    if not common:
+        return None
+    return max(common)
+
+
+def fetch_tick(requested_cutoff: pd.Timestamp):
+    """Fetch all live series and use their newest common completed 5m timestamp.
+
+    This avoids rejecting a whole cycle when one symbol arrives a little later than the
+    others. The common timestamp must be no more than MAX_COMMON_LAG_MINUTES behind the
+    requested bar, so we never silently score stale data.
+    """
+    date_s = requested_cutoff.strftime("%Y-%m-%d")
     last_error = None
     for attempt in range(4):
         for ip, port in servers():
@@ -73,23 +93,32 @@ def fetch_tick(cutoff: pd.Timestamp):
                 api = TdxHq_API(heartbeat=False, auto_retry=False, raise_exception=True)
                 if not api.connect(ip, port, time_out=1.5):
                     continue
-                prefixes = {}
-                stale = []
+
+                full_map = {}
                 for s in PCB_STOCKS:
                     rows = api.get_security_bars(0, 1 if s.startswith("6") else 0, s, 0, 800) or []
-                    full = parse_rows(api, rows, date_s, False)
-                    p = full[full.ts <= cutoff].copy().sort_values("ts")
-                    if p.empty or pd.Timestamp(p.iloc[-1].ts) != cutoff:
-                        stale.append(s)
-                    prefixes[s] = p
+                    full_map[s] = parse_rows(api, rows, date_s, False)
                 rows = api.get_index_bars(0, 1, "000001", 0, 800) or []
-                full_idx = parse_rows(api, rows, date_s, True)
-                idx_prefix = full_idx[full_idx.ts <= cutoff].copy().sort_values("ts")
-                if idx_prefix.empty or pd.Timestamp(idx_prefix.iloc[-1].ts) != cutoff:
-                    stale.append(INDEX)
-                if not stale:
-                    return prefixes, idx_prefix, f"{ip}:{port}"
-                last_error = RuntimeError(f"目标K线尚未完整: {','.join(stale)}")
+                full_map[INDEX] = parse_rows(api, rows, date_s, True)
+
+                common_cutoff = _latest_common_cutoff(full_map, requested_cutoff)
+                if common_cutoff is None:
+                    last_error = RuntimeError("7条行情不存在共同完整5分钟K线")
+                    continue
+
+                lag_minutes = (requested_cutoff - common_cutoff).total_seconds() / 60.0
+                if lag_minutes > MAX_COMMON_LAG_MINUTES + 1e-9:
+                    last_error = RuntimeError(
+                        f"共同K线过旧: requested={requested_cutoff}, common={common_cutoff}, lag={lag_minutes:.1f}m"
+                    )
+                    continue
+
+                prefixes = {}
+                for s in PCB_STOCKS:
+                    prefixes[s] = full_map[s][full_map[s].ts <= common_cutoff].copy().sort_values("ts")
+                idx_prefix = full_map[INDEX][full_map[INDEX].ts <= common_cutoff].copy().sort_values("ts")
+
+                return prefixes, idx_prefix, f"{ip}:{port}", pd.Timestamp(common_cutoff)
             except Exception as exc:
                 last_error = exc
             finally:
@@ -198,13 +227,22 @@ def main():
     last_state = None
     last_push_top = None
     last_push_bottom = None
+    last_scored_cutoff = None
 
     for target_dt in pending:
         wait_until(target_dt + timedelta(seconds=BAR_SETTLE_SECONDS))
-        cutoff = pd.Timestamp(target_dt.replace(tzinfo=None))
-        bar_time = target_dt.strftime("%H:%M")
+        requested_cutoff = pd.Timestamp(target_dt.replace(tzinfo=None))
+        requested_bar_time = target_dt.strftime("%H:%M")
         try:
-            prefixes, idx_prefix, source = fetch_tick(cutoff)
+            prefixes, idx_prefix, source, cutoff = fetch_tick(requested_cutoff)
+            if last_scored_cutoff is not None and cutoff <= last_scored_cutoff:
+                print(
+                    "LIVE_DUPLICATE_COMMON_BAR_SKIP",
+                    requested_bar_time, cutoff.strftime("%H:%M"),
+                    flush=True,
+                )
+                continue
+
             for s, p in prefixes.items():
                 append_prefix(s, p, False)
             append_prefix(INDEX, idx_prefix, True)
@@ -214,6 +252,7 @@ def main():
             current = float(last.close)
             running_high = float(prefix.high.max())
             running_low = float(prefix.low.min())
+            bar_time = cutoff.strftime("%H:%M")
 
             if not startup_sent:
                 send_compact(
@@ -224,9 +263,11 @@ def main():
 
             if bar_time < "09:50":
                 write_audit({
-                    "时间": str(cutoff), "现价": current, "状态": "等待有效时点",
+                    "请求时间": str(requested_cutoff), "实际共同K线": str(cutoff),
+                    "现价": current, "状态": "等待有效时点",
                     "行情源": source, "未来K线参与计算": False,
                 })
+                last_scored_cutoff = cutoff
                 continue
 
             row = build_current_feature_row(cutoff)
@@ -249,7 +290,8 @@ def main():
                 state, conclusion, color = "观察", "底部概率占优，但已离低点", "blue"
 
             rec = {
-                "时间": str(cutoff), "现价": round(current, 2),
+                "请求时间": str(requested_cutoff), "实际共同K线": str(cutoff),
+                "现价": round(current, 2),
                 "顶部锁定概率": round(p_top, 6), "底部锁定概率": round(p_bottom, 6),
                 "距日高": round(gap_high, 6), "距日低": round(gap_low, 6),
                 "状态": state, "结论": conclusion, "行情源": source,
@@ -274,13 +316,14 @@ def main():
                 last_state = state
                 last_push_top = p_top
                 last_push_bottom = p_bottom
+            last_scored_cutoff = cutoff
         except Exception as exc:
-            rec = {"时间": str(cutoff), "错误": repr(exc), "未来K线参与计算": False}
+            rec = {"请求时间": str(requested_cutoff), "错误": repr(exc), "未来K线参与计算": False}
             write_audit(rec)
             print("LIVE_TICK_FAIL", json.dumps(rec, ensure_ascii=False), flush=True)
             try:
                 send_compact(
-                    f"{NAME}｜{bar_time}｜数据异常", "red", bar_time, None, "—", "—",
+                    f"{NAME}｜{requested_bar_time}｜数据异常", "red", requested_bar_time, None, "—", "—",
                     "本周期未计算，请勿使用旧信号",
                 )
             except Exception as push_exc:
