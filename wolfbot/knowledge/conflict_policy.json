@@ -1,0 +1,63 @@
+{
+  "schema_version": 1,
+  "policy_name": "阿狼体系冲突处理规则",
+  "principles": [
+    {
+      "order": 1,
+      "type": "explicit_self_correction",
+      "rule": "如果新发言明确说旧判断/旧方法需要纠偏、修正、失效，则新规则优先；旧规则保留历史版本并标记superseded，不物理删除。"
+    },
+    {
+      "order": 2,
+      "type": "special_regime_override",
+      "rule": "如果新规则明确属于特殊时期、量化异常、政策/GJD干预、战争或其他特殊市场结构，则记录为temporary_override，只覆盖对应scope，不替代general规则。"
+    },
+    {
+      "order": 3,
+      "type": "scope_narrowing",
+      "rule": "更具体的规则只在更窄场景内优先，例如长线、短线、调整、主升、机构行情、情绪行情分别处理；不能拿一个场景的规则否定另一场景。"
+    },
+    {
+      "order": 4,
+      "type": "parameter_update",
+      "rule": "均线、关键点位、仓位比例、量能阈值等数字变化优先视为参数更新，不自动视为核心方法反转；保留生效日期和市场背景。"
+    },
+    {
+      "order": 5,
+      "type": "example_vs_rule",
+      "rule": "单次个股点评、一次性盘中应对、事后复盘案例默认不升级为通用规则；除非出现明确原则化表达、重复出现或与既有规则形成可验证的抽象关系。"
+    },
+    {
+      "order": 6,
+      "type": "market_validation",
+      "rule": "新旧说法表面冲突时优先检查市场环境、资金结构、时间周期和交易类型；阿狼体系本身强调联系上下文、让市场验证而不是死背定式。"
+    },
+    {
+      "order": 7,
+      "type": "unresolved",
+      "rule": "无法确定是替代、补充还是特例时，不强行合并；两条都保留，状态设为unresolved，机器人回答时明确指出冲突和适用条件尚未确认。"
+    }
+  ],
+  "decision_types": [
+    "reinforce",
+    "new_rule",
+    "parameter_update",
+    "scope_narrowing",
+    "scope_expansion",
+    "temporary_override",
+    "supersede",
+    "example_only",
+    "no_rule",
+    "unresolved"
+  ],
+  "versioning": {
+    "patch": "文字澄清、证据增加、参数轻微调整，不改变交易行为。",
+    "minor": "新增规则、增加适用场景、增加条件性覆盖。",
+    "major": "核心方法发生实质反转，例如趋势/量价/仓位等核心原则被明确推翻。"
+  },
+  "promotion_gate": {
+    "required": ["verified_author", "source_pointer", "rule_summary", "scope", "decision", "confidence"],
+    "auto_promote": false,
+    "note": "后台采集只生成候选；最终进入current_rules前由ChatGPT项目侧进行语义审阅。"
+  }
+}
