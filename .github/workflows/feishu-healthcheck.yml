@@ -1,0 +1,21 @@
+name: feishu-healthcheck
+
+on:
+  push:
+    paths:
+      - 'market_data/feishu_healthcheck_trigger.txt'
+      - '.github/workflows/feishu-healthcheck.yml'
+
+jobs:
+  send:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Send status card
+        env:
+          FEISHU_WEBHOOK_URL: ${{ secrets.FEISHU_WEBHOOK_URL }}
+          FEISHU_MESSAGE: '【盘中监控状态】实时计算链路正在修复；本周期未生成交易信号。'
+        run: python market_data/feishu_notifier.py
