@@ -5,6 +5,7 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
+import joblib
 import numpy as np
 import pandas as pd
 from pytdx.hq import TdxHq_API
@@ -25,6 +26,7 @@ SYMBOL = os.getenv("LIVE_SYMBOL", "002916").strip()
 NAME = "深南电路" if SYMBOL == "002916" else SYMBOL
 PUSH_DELTA = float(os.getenv("LIVE_PUSH_DELTA", "0.15"))
 BAR_SETTLE_SECONDS = int(os.getenv("LIVE_BAR_SETTLE_SECONDS", "25"))
+MODEL_BUNDLE = BASE / "live_cache" / "model_bundle.joblib"
 
 PREFERRED = [("202.108.253.139", 80)]
 
@@ -148,7 +150,6 @@ def wait_until(dt):
 
 
 def startup_pending_times(times):
-    """Process the newest already-settled bar immediately, then continue with future bars."""
     now = datetime.now(TZ)
     settled = [x for x in times if x + timedelta(seconds=BAR_SETTLE_SECONDS) <= now]
     future = [x for x in times if x + timedelta(seconds=BAR_SETTLE_SECONDS) > now]
@@ -159,10 +160,17 @@ def startup_pending_times(times):
     return pending
 
 
-def main():
-    today = datetime.now(TZ).date()
-    print("LIVE_MONITOR_START", today, flush=True)
+def load_models(today):
+    if MODEL_BUNDLE.exists():
+        bundle = joblib.load(MODEL_BUNDLE)
+        print(
+            "LIVE_MODEL_CACHE_READY",
+            bundle.get("train_days"), bundle.get("train_start"), bundle.get("train_end"),
+            flush=True,
+        )
+        return bundle["top_model"], bundle["bottom_model"], str(bundle.get("train_end", ""))
 
+    print("LIVE_MODEL_CACHE_MISS_FALLBACK_TRAIN", flush=True)
     v13.load_a = load_a_cloud
     raw = v37.build_frame()
     train = raw[(raw.day >= v37.BULL_START) & (raw.day < today) & v37.eligible(raw)].copy()
@@ -170,7 +178,14 @@ def main():
         raise RuntimeError(f"训练样本不足: {train.day.nunique()} days")
     top_model = v37.fit_model(train, "top_locked_running")
     bottom_model = v37.fit_model(train, "bottom_locked_running")
-    print("LIVE_MODEL_READY", train.day.nunique(), min(train.day), max(train.day), flush=True)
+    return top_model, bottom_model, str(max(train.day))
+
+
+def main():
+    today = datetime.now(TZ).date()
+    print("LIVE_MONITOR_START", today, flush=True)
+    v13.load_a = load_a_cloud
+    top_model, bottom_model, train_end = load_models(today)
 
     times = tick_times(today)
     pending = startup_pending_times(times)
@@ -238,7 +253,7 @@ def main():
                 "顶部锁定概率": round(p_top, 6), "底部锁定概率": round(p_bottom, 6),
                 "距日高": round(gap_high, 6), "距日低": round(gap_low, 6),
                 "状态": state, "结论": conclusion, "行情源": source,
-                "训练截止": str(max(train.day)), "未来K线参与计算": False,
+                "训练截止": train_end, "未来K线参与计算": False,
             }
             write_audit(rec)
             print("LIVE_SCORE", json.dumps(rec, ensure_ascii=False), flush=True)
