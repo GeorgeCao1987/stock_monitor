@@ -7,8 +7,9 @@ import os
 import re
 import time
 from dataclasses import asdict, dataclass
+from datetime import datetime, timezone
 from pathlib import Path
-from typing import Iterable
+from typing import Iterable, Any
 from urllib.parse import urljoin
 
 import requests
@@ -18,6 +19,11 @@ from dotenv import load_dotenv
 load_dotenv()
 
 DEFAULT_BASE = "https://bbs.nga.cn"
+DEFAULT_BASES = (
+    "https://bbs.nga.cn",
+    "https://nga.178.com",
+    "https://bbs.ngacn.cc",
+)
 DEFAULT_UID = 150058
 DEFAULT_TID = 45974302
 DEFAULT_SLEEP = 1.2
@@ -50,8 +56,19 @@ def _make_pid(tid: int, page: int, floor: str, content: str) -> str:
 
 
 def _parse_cookie_string(cookie: str) -> dict[str, str]:
+    """Parse a browser Cookie header value robustly.
+
+    Users sometimes paste either the raw value or the whole `Cookie: ...` line,
+    and sometimes GitHub Secrets keep surrounding quotes. Accept all of these.
+    """
+    raw = (cookie or "").strip()
+    if len(raw) >= 2 and raw[0] == raw[-1] and raw[0] in {'"', "'"}:
+        raw = raw[1:-1].strip()
+    if raw.lower().startswith("cookie:"):
+        raw = raw.split(":", 1)[1].strip()
+
     out: dict[str, str] = {}
-    for part in cookie.split(";"):
+    for part in raw.split(";"):
         if "=" not in part:
             continue
         k, v = part.split("=", 1)
@@ -59,6 +76,37 @@ def _parse_cookie_string(cookie: str) -> dict[str, str]:
         if k:
             out[k] = v.strip()
     return out
+
+
+def _decode_bytes(data: bytes, preferred: str | None = None) -> str:
+    encodings: list[str] = []
+    if preferred:
+        encodings.append(preferred)
+    encodings.extend(["utf-8-sig", "utf-8", "gb18030"])
+    seen: set[str] = set()
+    for enc in encodings:
+        enc = enc.lower()
+        if enc in seen:
+            continue
+        seen.add(enc)
+        try:
+            return data.decode(enc)
+        except Exception:
+            pass
+    return data.decode("utf-8", errors="replace")
+
+
+def _epoch_or_text(value: Any) -> str:
+    if value is None:
+        return ""
+    if isinstance(value, (int, float)) or (isinstance(value, str) and value.isdigit()):
+        try:
+            n = int(value)
+            if n > 1_000_000_000:
+                return datetime.fromtimestamp(n, tz=timezone.utc).astimezone().strftime("%Y-%m-%d %H:%M:%S")
+        except Exception:
+            pass
+    return str(value)
 
 
 class NgaCrawler:
@@ -69,35 +117,121 @@ class NgaCrawler:
         sleep_seconds: float = DEFAULT_SLEEP,
         timeout: int = 20,
     ) -> None:
-        self.base_url = base_url.rstrip("/")
+        configured = [x.strip().rstrip("/") for x in os.getenv("NGA_BASE_URLS", "").split(",") if x.strip()]
+        candidates = configured or [base_url.rstrip("/"), *DEFAULT_BASES]
+        self.base_urls: list[str] = []
+        for x in candidates:
+            if x and x not in self.base_urls:
+                self.base_urls.append(x)
+        self.base_url = self.base_urls[0]
         self.sleep_seconds = sleep_seconds
         self.timeout = timeout
         self.session = requests.Session()
         self.session.headers.update(
             {
-                "User-Agent": os.getenv(
-                    "NGA_USER_AGENT",
-                    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-                    "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120 Safari/537.36",
-                ),
+                "User-Agent": os.getenv("NGA_USER_AGENT", "Nga_Official/80023"),
                 "X-User-Agent": "Nga_Official",
-                "Referer": self.base_url + "/",
+                "Accept-Language": "zh-CN,zh;q=0.9",
             }
         )
         cookie = cookie or os.getenv("NGA_COOKIE", "")
-        if cookie:
-            self.session.cookies.update(_parse_cookie_string(cookie))
+        self.cookie_map = _parse_cookie_string(cookie)
+        if self.cookie_map:
+            self.session.cookies.update(self.cookie_map)
 
-    def _get(self, path: str, params: dict) -> requests.Response:
-        url = urljoin(self.base_url + "/", path.lstrip("/"))
-        r = self.session.get(url, params=params, timeout=self.timeout)
+    @staticmethod
+    def _looks_blocked(text: str) -> bool:
+        markers = [
+            "版面关闭",
+            "你可能需要",
+            "登录后访问",
+            "你必须登录",
+            "ERROR:2048",
+            "权限不足",
+        ]
+        return any(x in text for x in markers)
+
+    def _get(self, base: str, path: str, params: dict[str, Any]) -> requests.Response:
+        url = urljoin(base + "/", path.lstrip("/"))
+        headers = {"Referer": base + "/"}
+        r = self.session.get(url, params=params, timeout=self.timeout, headers=headers)
         r.raise_for_status()
         return r
 
-    @staticmethod
-    def _looks_blocked(html: str) -> bool:
-        markers = ["版面关闭", "你可能需要", "登录后访问", "ERROR:2048"]
-        return any(x in html for x in markers)
+    def _parse_api_page(self, raw: bytes, uid: int, tid: int, page: int, base: str) -> tuple[list[NgaPost], bool]:
+        text = _decode_bytes(raw, "utf-8")
+        if self._looks_blocked(text):
+            return [], True
+
+        start = text.find("{")
+        end = text.rfind("}")
+        if start < 0 or end <= start:
+            return [], False
+        try:
+            data = json.loads(text[start : end + 1], strict=False)
+        except Exception:
+            return [], False
+        if not isinstance(data, dict):
+            return [], False
+
+        serialized = json.dumps(data, ensure_ascii=False)
+        if self._looks_blocked(serialized):
+            return [], True
+
+        replies = data.get("__R", {})
+        users = data.get("__U", {})
+        if isinstance(replies, list):
+            reply_rows = replies
+        elif isinstance(replies, dict):
+            def _sort_key(item: tuple[str, Any]) -> tuple[int, str]:
+                k = str(item[0])
+                return (int(k) if k.isdigit() else 10**9, k)
+            reply_rows = [v for _, v in sorted(replies.items(), key=_sort_key)]
+        else:
+            reply_rows = []
+
+        posts: list[NgaPost] = []
+        for row in reply_rows:
+            if not isinstance(row, dict):
+                continue
+            try:
+                author_id = int(row.get("authorid", 0))
+            except Exception:
+                author_id = 0
+            if author_id != uid:
+                continue
+            content = row.get("content")
+            if content is None:
+                continue
+            content = _clean_text(str(content))
+            if not content:
+                continue
+
+            pid = str(row.get("pid") or "")
+            floor = str(row.get("lou") if row.get("lou") is not None else "")
+            if not pid:
+                pid = _make_pid(tid, page, floor, content)
+
+            author = "[-阿狼-]"
+            if isinstance(users, dict):
+                u = users.get(str(uid)) or users.get(uid)
+                if isinstance(u, dict) and u.get("username"):
+                    author = _clean_text(str(u.get("username")))
+
+            posts.append(
+                NgaPost(
+                    uid=uid,
+                    tid=tid,
+                    page=page,
+                    floor=floor,
+                    pid=pid,
+                    author=author,
+                    posted_at=_epoch_or_text(row.get("postdate")),
+                    content=content,
+                    url=f"{base}/read.php?tid={tid}&authorid={uid}&page={page}",
+                )
+            )
+        return posts, False
 
     def _parse_author_only_page(
         self,
@@ -105,13 +239,13 @@ class NgaCrawler:
         uid: int,
         tid: int,
         page: int,
+        base: str,
     ) -> list[NgaPost]:
         soup = BeautifulSoup(html, "lxml")
         posts: list[NgaPost] = []
 
         rows = soup.select("[id^='postrow']")
         if not rows:
-            # NGA occasionally changes wrappers; postcontent remains relatively stable.
             content_nodes = soup.select("[id^='postcontent']")
             rows = [n.parent for n in content_nodes if n.parent is not None]
 
@@ -129,6 +263,10 @@ class NgaCrawler:
             content_node = row.select_one("[id^='postcontent']") or row.select_one(".postcontent")
             if not content_node:
                 continue
+            # Remove rendered quote blocks where possible so another user's words do not
+            # become candidate rules attributed to 阿狼.
+            for q in content_node.select(".quote, blockquote, [class*='quote']"):
+                q.decompose()
             content = _clean_text(content_node.get_text("\n", strip=True))
             if not content:
                 continue
@@ -153,7 +291,6 @@ class NgaCrawler:
             if dt:
                 posted_at = dt.group(0)
 
-            url = f"{self.base_url}/read.php?tid={tid}&authorid={uid}&page={page}"
             posts.append(
                 NgaPost(
                     uid=uid,
@@ -164,10 +301,67 @@ class NgaCrawler:
                     author=author or "[-阿狼-]",
                     posted_at=posted_at,
                     content=content,
-                    url=url,
+                    url=f"{base}/read.php?tid={tid}&authorid={uid}&page={page}",
                 )
             )
         return posts
+
+    def _fetch_page(self, uid: int, tid: int, page: int) -> list[NgaPost]:
+        attempts: list[str] = []
+        for base in self.base_urls:
+            # First try NGA's UTF-8 JSON read API. It is less fragile than HTML and
+            # works better from cloud runners on some NGA front doors.
+            try:
+                r = self._get(
+                    base,
+                    "/read.php",
+                    {
+                        "tid": tid,
+                        "authorid": uid,
+                        "page": page,
+                        "__output": 11,
+                        "noprefix": "",
+                        "v2": "",
+                    },
+                )
+                posts, blocked = self._parse_api_page(r.content, uid=uid, tid=tid, page=page, base=base)
+                if posts:
+                    self.base_url = base
+                    return posts
+                if not blocked:
+                    # Valid API response with no author rows normally means end page.
+                    text = _decode_bytes(r.content, "utf-8")
+                    if '"__R"' in text or '"__PAGE"' in text:
+                        self.base_url = base
+                        return []
+                attempts.append(f"{base}:api_blocked" if blocked else f"{base}:api_unparsed")
+            except Exception as exc:
+                attempts.append(f"{base}:api_{type(exc).__name__}")
+
+            # Fallback to the HTML author-only view, as NGA occasionally returns
+            # incomplete JSON for read.php.
+            try:
+                r = self._get(
+                    base,
+                    "/read.php",
+                    {"tid": tid, "authorid": uid, "page": page, "noBBCode": ""},
+                )
+                html = _decode_bytes(r.content, r.encoding)
+                if self._looks_blocked(html):
+                    attempts.append(f"{base}:html_blocked")
+                    continue
+                posts = self._parse_author_only_page(html, uid=uid, tid=tid, page=page, base=base)
+                self.base_url = base
+                return posts
+            except Exception as exc:
+                attempts.append(f"{base}:html_{type(exc).__name__}")
+
+        auth_present = bool(self.cookie_map.get("ngaPassportUid") and self.cookie_map.get("ngaPassportCid"))
+        raise RuntimeError(
+            "NGA authentication failed from all cloud endpoints. "
+            f"auth_cookie_fields_present={auth_present}; attempts={','.join(attempts)}. "
+            "Refresh ngaPassportUid/ngaPassportCid from a logged-in browser if needed."
+        )
 
     def crawl_thread_author(
         self,
@@ -176,33 +370,12 @@ class NgaCrawler:
         start_page: int = 1,
         max_pages: int = 5000,
     ) -> Iterable[NgaPost]:
-        """Crawl only one author's replies in one thread.
-
-        NGA supports read.php?tid=<tid>&authorid=<uid>&page=<n>, so we avoid
-        traversing every ordinary thread page. Pagination stops when the next page
-        contains no posts or repeats the previous page's post signature.
-        """
+        """Crawl one author's replies in one thread with cloud-friendly endpoint fallback."""
         last_signature: tuple[str, ...] | None = None
         seen_pid: set[str] = set()
 
         for page in range(start_page, start_page + max_pages):
-            r = self._get(
-                "/read.php",
-                {
-                    "tid": tid,
-                    "authorid": uid,
-                    "page": page,
-                    "noBBCode": "",
-                },
-            )
-            html = r.text
-            if self._looks_blocked(html):
-                raise RuntimeError(
-                    "NGA returned a login/permission page. Set NGA_COOKIE with your "
-                    "browser cookies, e.g. ngaPassportUid=...; ngaPassportCid=..."
-                )
-
-            posts = self._parse_author_only_page(html, uid=uid, tid=tid, page=page)
+            posts = self._fetch_page(uid=uid, tid=tid, page=page)
             signature = tuple(p.pid for p in posts)
             if not posts or signature == last_signature:
                 break
@@ -267,7 +440,7 @@ def main() -> None:
             max_pages=args.max_pages,
         ),
     )
-    print(f"added={n} out={out}")
+    print(f"added={n} out={out} endpoint={crawler.base_url}")
 
 
 if __name__ == "__main__":
