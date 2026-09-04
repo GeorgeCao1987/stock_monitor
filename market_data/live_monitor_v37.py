@@ -26,7 +26,6 @@ NAME = "深南电路" if SYMBOL == "002916" else SYMBOL
 PUSH_DELTA = float(os.getenv("LIVE_PUSH_DELTA", "0.15"))
 BAR_SETTLE_SECONDS = int(os.getenv("LIVE_BAR_SETTLE_SECONDS", "25"))
 
-# Known-good server is tried first, then the canonical list provides fallback.
 PREFERRED = [("202.108.253.139", 80)]
 
 
@@ -116,7 +115,7 @@ def send_compact(title, color, bar_time, price, top, bottom, conclusion):
         "结论": conclusion,
     }
     result = send_card(webhook, build_signal_card(data))
-    print("FEISHU_LIVE_PUSH_OK", json.dumps(result, ensure_ascii=False))
+    print("FEISHU_LIVE_PUSH_OK", json.dumps(result, ensure_ascii=False), flush=True)
 
 
 def write_audit(rec):
@@ -148,11 +147,22 @@ def wait_until(dt):
         time.sleep(min(30, remain))
 
 
+def startup_pending_times(times):
+    """Process the newest already-settled bar immediately, then continue with future bars."""
+    now = datetime.now(TZ)
+    settled = [x for x in times if x + timedelta(seconds=BAR_SETTLE_SECONDS) <= now]
+    future = [x for x in times if x + timedelta(seconds=BAR_SETTLE_SECONDS) > now]
+    pending = []
+    if settled:
+        pending.append(settled[-1])
+    pending.extend(future)
+    return pending
+
+
 def main():
     today = datetime.now(TZ).date()
-    print("LIVE_MONITOR_START", today)
+    print("LIVE_MONITOR_START", today, flush=True)
 
-    # Historical files were collected by the workflow only through the prior day.
     v13.load_a = load_a_cloud
     raw = v37.build_frame()
     train = raw[(raw.day >= v37.BULL_START) & (raw.day < today) & v37.eligible(raw)].copy()
@@ -160,13 +170,12 @@ def main():
         raise RuntimeError(f"训练样本不足: {train.day.nunique()} days")
     top_model = v37.fit_model(train, "top_locked_running")
     bottom_model = v37.fit_model(train, "bottom_locked_running")
-    print("LIVE_MODEL_READY", train.day.nunique(), min(train.day), max(train.day))
+    print("LIVE_MODEL_READY", train.day.nunique(), min(train.day), max(train.day), flush=True)
 
     times = tick_times(today)
-    now = datetime.now(TZ)
-    pending = [x for x in times if x + timedelta(seconds=BAR_SETTLE_SECONDS) >= now]
+    pending = startup_pending_times(times)
     if not pending:
-        print("LIVE_MONITOR_OUTSIDE_WINDOW")
+        print("LIVE_MONITOR_OUTSIDE_WINDOW", flush=True)
         return
 
     startup_sent = False
@@ -198,7 +207,6 @@ def main():
                 )
                 startup_sent = True
 
-            # V3.7 validated decision window begins at 09:50.
             if bar_time < "09:50":
                 write_audit({
                     "时间": str(cutoff), "现价": current, "状态": "等待有效时点",
@@ -233,7 +241,7 @@ def main():
                 "训练截止": str(max(train.day)), "未来K线参与计算": False,
             }
             write_audit(rec)
-            print("LIVE_SCORE", json.dumps(rec, ensure_ascii=False))
+            print("LIVE_SCORE", json.dumps(rec, ensure_ascii=False), flush=True)
 
             changed = last_state is None or state != last_state
             moved = (
@@ -254,16 +262,16 @@ def main():
         except Exception as exc:
             rec = {"时间": str(cutoff), "错误": repr(exc), "未来K线参与计算": False}
             write_audit(rec)
-            print("LIVE_TICK_FAIL", json.dumps(rec, ensure_ascii=False))
+            print("LIVE_TICK_FAIL", json.dumps(rec, ensure_ascii=False), flush=True)
             try:
                 send_compact(
                     f"{NAME}｜{bar_time}｜数据异常", "red", bar_time, None, "—", "—",
                     "本周期未计算，请勿使用旧信号",
                 )
             except Exception as push_exc:
-                print("LIVE_ERROR_PUSH_FAIL", repr(push_exc))
+                print("LIVE_ERROR_PUSH_FAIL", repr(push_exc), flush=True)
 
-    print("LIVE_MONITOR_END")
+    print("LIVE_MONITOR_END", flush=True)
 
 
 if __name__ == "__main__":
