@@ -2,8 +2,11 @@ name: live-tick-v37
 
 on:
   schedule:
-    # Trigger about one minute after each five-minute bar close (UTC cron).
+    # Three staggered attempts after each five-minute bar close. Any delayed/missed cron
+    # is covered by the next offset; sent-marker dedup guarantees only one Feishu push.
     - cron: '1-56/5 1-7 * * 1-5'
+    - cron: '2-57/5 1-7 * * 1-5'
+    - cron: '3-58/5 1-7 * * 1-5'
   workflow_dispatch:
   push:
     paths:
@@ -59,11 +62,9 @@ jobs:
           in_window = ('09:30' <= hhmm <= '11:35') or ('13:00' <= hhmm <= '15:10')
           should_run = is_trading and in_window
 
-          # Model/cache cutoff is the previous actual XSHG trading session, not yesterday's calendar date.
           prev_session = cal.previous_session(today) if is_trading else cal.date_to_session(today, direction='previous')
           train_end = prev_session.date()
 
-          # Jobs fire roughly one minute after a bar close; floor to the corresponding 5m bar.
           minute = (now.minute // 5) * 5
           bucket = now.replace(minute=minute, second=0, microsecond=0)
           tick_key = bucket.strftime('%Y%m%d-%H%M')
