@@ -1,4 +1,4 @@
-# trigger: cloud-endpoint-fallback-v2
+# trigger: cookie-refresh-retry-v3
 name: WolfBot NGA Knowledge Sync
 
 on:
