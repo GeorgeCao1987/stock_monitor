@@ -86,6 +86,10 @@ jobs:
           RULE_LLM_MODEL: ${{ secrets.RULE_LLM_MODEL }}
         run: python wolfbot/sync_pipeline.py
 
+      - name: Build derived semantic review digest
+        if: steps.credential.outputs.configured == 'true'
+        run: python wolfbot/build_review_digest.py
+
       - name: Commit knowledge delta to wolfbot branch
         if: steps.credential.outputs.configured == 'true'
         run: |
