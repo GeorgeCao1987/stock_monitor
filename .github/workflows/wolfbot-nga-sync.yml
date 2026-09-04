@@ -48,42 +48,28 @@ jobs:
             echo "configured=true" >> "$GITHUB_OUTPUT"
           fi
 
-      - name: Diagnose author-only page
+      - name: Archive immutable author-only sources
         if: steps.credential.outputs.configured == 'true'
         env:
           NGA_COOKIE: ${{ secrets.NGA_COOKIE }}
+          NGA_UID: "150058"
+          NGA_TID: "47288722"
+          NGA_ARCHIVE_MAX_PAGES: "5000"
+          NGA_ARCHIVE_SLEEP: "0.8"
+        run: python wolfbot/nga_author_archive.py
+
+      - name: Patch NGA API envelope compatibility
+        if: steps.credential.outputs.configured == 'true'
         run: |
           python - <<'PY'
-          import hashlib, json, os, re, requests
-          from bs4 import BeautifulSoup
-          s=requests.Session()
-          s.headers.update({'User-Agent':'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/152 Safari/537.36','Accept-Language':'zh-CN,zh;q=0.9'})
-          raw=os.environ.get('NGA_COOKIE','').strip()
-          for part in raw.split(';'):
-              if '=' in part:
-                  k,v=part.split('=',1); s.cookies.set(k.strip(),v.strip())
-          p={'tid':'47288722','authorid':'150058','page':'1','__output':'11'}
-          r=s.get('https://bbs.nga.cn/read.php',params=p,timeout=20)
-          t=r.text
-          start,end=t.find('{'),t.rfind('}')
-          data=json.loads(t[start:end+1], strict=False) if start>=0 and end>start else {}
-          print({'status':r.status_code,'len':len(t),'sha256':hashlib.sha256(r.content).hexdigest(),'top_keys':sorted(data.keys()),'R_type':type(data.get('__R')).__name__,'T_type':type(data.get('__T')).__name__,'PAGE':data.get('__PAGE')})
-          R=data.get('__R')
-          if isinstance(R,dict): print({'R_count':len(R),'R_keys_head':list(R.keys())[:5]})
-          elif isinstance(R,list): print({'R_count':len(R)})
-          T=data.get('__T')
-          if isinstance(T,dict): print({'T_keys':sorted(T.keys())})
-          found=[]
-          def walk(x,path='root'):
-              if isinstance(x,dict):
-                  aid=x.get('authorid')
-                  if str(aid)=='150058':
-                      found.append({'path':path,'keys':sorted(x.keys()),'pid':x.get('pid'),'lou':x.get('lou'),'postdate':x.get('postdate'),'content_len':len(str(x.get('content','')))})
-                  for k,v in x.items(): walk(v,f'{path}.{k}')
-              elif isinstance(x,list):
-                  for i,v in enumerate(x): walk(v,f'{path}[{i}]')
-          walk(data)
-          print({'author_rows_found':len(found),'author_rows_head':found[:3]})
+          from pathlib import Path
+          p=Path('wolfbot/crawler.py')
+          s=p.read_text(encoding='utf-8')
+          needle='''        if not isinstance(data, dict):\n            return [], False\n\n        serialized = json.dumps(data, ensure_ascii=False)\n'''
+          repl='''        if not isinstance(data, dict):\n            return [], False\n        # Newer NGA JSON wraps __R/__T/__PAGE under top-level data.\n        if isinstance(data.get("data"), dict):\n            data = data["data"]\n\n        serialized = json.dumps(data, ensure_ascii=False)\n'''
+          if needle not in s:
+              raise SystemExit('crawler envelope patch target not found')
+          p.write_text(s.replace(needle,repl,1),encoding='utf-8')
           PY
 
       - name: Crawl and build rule candidates
@@ -92,7 +78,7 @@ jobs:
           NGA_COOKIE: ${{ secrets.NGA_COOKIE }}
           NGA_UID: "150058"
           NGA_TID: "47288722"
-          NGA_SYNC_SLEEP: "1.0"
+          NGA_SYNC_SLEEP: "0.8"
           NGA_SYNC_MAX_PAGES: "5000"
           NGA_BOOTSTRAP_MAX_PAGES: "5000"
           RULE_LLM_API_KEY: ${{ secrets.RULE_LLM_API_KEY }}
