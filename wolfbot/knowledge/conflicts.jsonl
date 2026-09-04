@@ -1,1 +1,2 @@
 
+{"conflict_id": "conf:R011:R020:20260904", "status": "resolved_by_scope", "annotation_at": "2026-09-04T20:00:00+08:00", "older_rule_id": "R011", "new_rule_id": "R020", "decision": "scope_narrowing", "explanation": "PDF的一般反弹规则是卖弱留强；2026-09-04对此前高位大科技的阶段总结出现卖强留弱、拉升后都走。该说法处于调整浪反抽/高位旧方向退出语境，只覆盖该scope，不推翻一般反弹规则。", "source_ids": ["nga:47288722:880650211:98f5f215be5abfba1efec3dc1d9126efcec5ce2ea1ca79e8099eed569a519db8"]}
