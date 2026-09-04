@@ -2,17 +2,25 @@ name: live-monitor-v37
 
 on:
   schedule:
-    # GitHub cron uses UTC. 01:05 UTC = 09:05 China/Singapore time.
-    - cron: '5 1 * * 1-5'
+    # GitHub cron uses UTC. Multiple early retries reduce the risk of a missed schedule.
+    - cron: '55 0 * * 1-5'  # 08:55 China time
+    - cron: '5 1 * * 1-5'   # 09:05
+    - cron: '15 1 * * 1-5'  # 09:15
+    - cron: '25 1 * * 1-5'  # 09:25
   workflow_dispatch:
   push:
     paths:
       - 'market_data/live_monitor_v37.py'
+      - 'market_data/live_start_trigger.txt'
       - '.github/workflows/live-monitor-v37.yml'
 
 permissions:
   contents: read
   actions: read
+
+concurrency:
+  group: live-monitor-v37
+  cancel-in-progress: true
 
 jobs:
   smoke-test:
@@ -27,7 +35,7 @@ jobs:
         run: python -m py_compile market_data/live_monitor_v37.py market_data/asof_replay_v37.py market_data/feishu_notifier.py
 
   realtime-monitor:
-    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && contains(github.event.head_commit.message, '[live-start]'))
     runs-on: ubuntu-latest
     timeout-minutes: 350
     env:
