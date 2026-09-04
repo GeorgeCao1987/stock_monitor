@@ -1,0 +1,28 @@
+{
+  "schema_version": 1,
+  "system": "阿狼交易体系",
+  "version": "1.0.0",
+  "version_date": "2026-09-04",
+  "baseline_cutoff": "2026-06-26",
+  "status": "active",
+  "source_policy": "PDF为基线；NGA新增发言先进入pending，经冲突规则审阅后再进入active。",
+  "rules": [
+    {"id":"R001","category":"strategy","title":"策略是条件应对，不是猜涨跌","statement":"先写清触发条件、动作和失效条件；条件没有出现就不动作。","scope":"general","priority":"core","status":"active"},
+    {"id":"R002","category":"trend","title":"趋势演化链","statement":"下跌→缩量→止跌→企稳→反抽→压力位补量→反弹→过颈线→加强→新高→反转；不能跳过中间确认阶段。","scope":"general","priority":"core","status":"active"},
+    {"id":"R003","category":"volume_price","title":"量价是技术分析基础","statement":"所有形态、支撑、压力和突破都要结合量能；关键压力突破不能明显缩量，放量跌破与缩量跌破含义不同。","scope":"general","priority":"core","status":"active"},
+    {"id":"R004","category":"validation","title":"市场验证优先于个人预判","statement":"可以预判，但必须让市场给答案；预判与盘面冲突时检讨、纠偏、修正，不为原判断辩护。","scope":"general","priority":"core","status":"active"},
+    {"id":"R005","category":"multi_factor","title":"不能只看个股K线","statement":"分析要联动大盘、板块、消息影响、监管/GJD、机构资金、相对强弱和盘中量能；技术图形只是其中一层。","scope":"general","priority":"core","status":"active"},
+    {"id":"R006","category":"timeframe","title":"日K定趋势，15分钟做日内","statement":"日K用于趋势判定，15分钟用于日内或隔日操作；更小级别不作为核心决策框架。","scope":"trend_trading","priority":"high","status":"active"},
+    {"id":"R007","category":"position","title":"仓位服从趋势环境","statement":"主升趋势高仓位，调整阶段约中仓，有明显风险降至低仓，下跌趋势原则上不做；仓位管理优先于做超额。","scope":"trend_trading","priority":"core","status":"active"},
+    {"id":"R008","category":"position","title":"禁止非理性加仓","statement":"亏损本身不是加仓理由；增加仓位必须来自新的趋势、支撑、量价或资金确认，不能用补仓掩盖原逻辑失效。","scope":"general","priority":"high","status":"active"},
+    {"id":"R009","category":"selection","title":"先选方向，再选个股","statement":"重要的不是指数是否止跌，而是买入后什么方向能涨；先确认市场认可的主线和板块共振，再从中找个股。","scope":"stock_selection","priority":"core","status":"active"},
+    {"id":"R010","category":"selection","title":"高位震荡中的相对确定性选股","statement":"强势板块优先看二线补涨或趋势核心；弱势板块只看明显强于板块的强势股；同时优先排除业绩暴雷、减持等可预见风险。","scope":"high_level_oscillation","priority":"high","status":"active"},
+    {"id":"R011","category":"sell","title":"反弹卖弱留强","statement":"反弹阶段优先处理弱票，保留相对更强、资金承接更好的股票，不能因为强票涨得多就机械卖掉而留下弱票。","scope":"rebound","priority":"high","status":"active"},
+    {"id":"R012","category":"chase","title":"调整和放量下跌中不追消息脉冲","statement":"调整区间不追高；放量下跌环境里的盘中消息冲高尤其不能追，先等结构和量价重新确认。","scope":"adjustment_or_volume_selloff","priority":"high","status":"active"},
+    {"id":"R013","category":"t_trade","title":"做T是次级策略","statement":"先保证大盘环境、板块主线和底仓逻辑正确，再考虑T；频繁T不能破坏最初买入与最终卖出逻辑，机构趋势票不要为了T丢失主升仓位。","scope":"t_trade","priority":"high","status":"active"},
+    {"id":"R014","category":"risk","title":"生存与确定性优先","statement":"不追求最大利润，优先控制回撤和被套概率；弱势环境宁可等确定性红K，也不要凭感觉抄底。","scope":"general","priority":"core","status":"active"},
+    {"id":"R015","category":"regime","title":"特殊市场结构允许临时覆盖常规规则","statement":"当量化、政策/GJD或突发风险改变市场微观结构时，可以采用特殊时期的特殊应对；临时策略只在对应环境有效，不能反过来永久替代常规规则。","scope":"special_regime","priority":"core","status":"active"},
+    {"id":"R016","category":"context","title":"规则必须联系上下文，不死背公式","statement":"同一种表面形态在不同资金、指数和板块联动背景下可以产生不同结果；规则必须带适用范围和前置条件。","scope":"general","priority":"core","status":"active"},
+    {"id":"R017","category":"events","title":"用投资日历和消息密度寻找资金聚焦","statement":"基本面和技术筛选后，再看当月及下月重大会议、经济数据和产业事件；盘中突发消息不追，预判后的超预期落地更有价值。","scope":"event_driven_filter","priority":"medium","status":"active"}
+  ]
+}
