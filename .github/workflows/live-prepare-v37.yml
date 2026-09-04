@@ -2,9 +2,9 @@ name: live-prepare-v37
 
 on:
   schedule:
-    - cron: '30 23 * * 1-5'  # 07:30 China time
-    - cron: '0 0 * * 1-5'    # 08:00
-    - cron: '30 0 * * 1-5'   # 08:30
+    # Pre-market fallback and after-close preparation for the next trading session.
+    - cron: '0 0 * * 1-5'   # 08:00 China time
+    - cron: '10 8 * * 1-5'  # 16:10 China time
   workflow_dispatch:
   push:
     paths:
@@ -18,11 +18,10 @@ permissions:
 
 concurrency:
   group: live-prepare-v37
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 jobs:
   prepare:
-    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && contains(github.event.head_commit.message, '[live-prepare]'))
     runs-on: ubuntu-latest
     timeout-minutes: 45
     env:
@@ -37,25 +36,56 @@ jobs:
       - run: |
           pip install -r market_data/requirements.txt
           pip install pytdx scikit-learn==1.7.2 joblib
-      - name: Resolve training cutoff and cache key
+
+      - name: Resolve actual training cutoff and cache key
         run: |
           python - <<'PY'
           import os
-          from datetime import datetime, timedelta
+          from datetime import datetime
           from zoneinfo import ZoneInfo
-          today = datetime.now(ZoneInfo('Asia/Shanghai')).date()
-          train_end = today - timedelta(days=1)
+          import pandas as pd
+          import exchange_calendars as xcals
+
+          now = datetime.now(ZoneInfo('Asia/Shanghai'))
+          cal = xcals.get_calendar('XSHG')
+          today = pd.Timestamp(now.date())
+          is_session = bool(cal.is_session(today))
+
+          # After the market is safely closed, include today's data. Before market, use the previous session.
+          if is_session and now.strftime('%H:%M') >= '15:20':
+              cutoff = today
+          elif is_session:
+              cutoff = cal.previous_session(today)
+          else:
+              cutoff = cal.date_to_session(today, direction='previous')
+
+          train_end = cutoff.date()
           with open(os.environ['GITHUB_ENV'], 'a', encoding='utf-8') as f:
               f.write(f'MARKET_END_DATE={train_end.isoformat()}\n')
               f.write(f'LIVE_CACHE_KEY=live-v37-{train_end.isoformat()}\n')
+          print('PREPARE_CUTOFF', train_end, 'CACHE_KEY', f'live-v37-{train_end.isoformat()}')
           PY
-      - name: Collect training history
+
+      - name: Check existing cache
+        id: existing
+        uses: actions/cache/restore@v4
+        with:
+          path: |
+            market_data/data
+            market_data/results/completeness.csv
+            market_data/live_cache
+          key: ${{ env.LIVE_CACHE_KEY }}
+
+      - name: Collect training history and train models
+        if: steps.existing.outputs.cache-hit != 'true'
         working-directory: market_data
         run: |
           rm -rf data results live_cache && mkdir -p data results live_cache
           python oos_core_collect.py
           python prepare_live_model_v37.py
+
       - name: Save live cache
+        if: steps.existing.outputs.cache-hit != 'true'
         uses: actions/cache/save@v4
         with:
           path: |
