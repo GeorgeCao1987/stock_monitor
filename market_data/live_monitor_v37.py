@@ -78,12 +78,6 @@ def _latest_common_cutoff(series_map, requested_cutoff):
 
 
 def fetch_tick(requested_cutoff: pd.Timestamp):
-    """Fetch all live series and use their newest common completed 5m timestamp.
-
-    This avoids rejecting a whole cycle when one symbol arrives a little later than the
-    others. The common timestamp must be no more than MAX_COMMON_LAG_MINUTES behind the
-    requested bar, so we never silently score stale data.
-    """
     date_s = requested_cutoff.strftime("%Y-%m-%d")
     last_error = None
     for attempt in range(4):
@@ -162,7 +156,7 @@ def tick_times(day):
         out.append(t)
         t += timedelta(minutes=5)
     t = datetime.combine(day, datetime.strptime("13:05", "%H:%M").time(), TZ)
-    end = datetime.combine(day, datetime.strptime("14:00", "%H:%M").time(), TZ)
+    end = datetime.combine(day, datetime.strptime("15:00", "%H:%M").time(), TZ)
     while t <= end:
         out.append(t)
         t += timedelta(minutes=5)
