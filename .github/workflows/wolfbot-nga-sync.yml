@@ -90,6 +90,10 @@ jobs:
         if: steps.credential.outputs.configured == 'true'
         run: python wolfbot/build_review_digest.py
 
+      - name: Apply reviewed V1.1.0 semantics
+        if: steps.credential.outputs.configured == 'true'
+        run: python wolfbot/apply_semantic_review_v110.py
+
       - name: Commit knowledge delta to wolfbot branch
         if: steps.credential.outputs.configured == 'true'
         run: |
