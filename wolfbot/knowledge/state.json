@@ -1,12 +1,12 @@
 {
   "schema_version": 1,
   "baseline_cutoff": "2026-06-26",
-  "last_author_page": 1,
-  "last_seen_pid": null,
-  "last_run_at": "2026-09-04T11:48:13+00:00",
-  "last_success_at": null,
-  "new_posts_last_run": 0,
+  "last_author_page": 40,
+  "last_seen_pid": "880650450",
+  "last_run_at": "2026-09-04T11:52:08+00:00",
+  "last_success_at": "2026-09-04T11:52:08+00:00",
+  "new_posts_last_run": 784,
   "notes": "首次云端同步会从作者页开始建立索引；后续只回看最近页并增量处理。",
-  "new_rule_candidates_last_run": 0,
+  "new_rule_candidates_last_run": 388,
   "new_conflicts_last_run": 0
 }

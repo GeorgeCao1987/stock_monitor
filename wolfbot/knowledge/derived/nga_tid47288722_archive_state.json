@@ -1,0 +1,12 @@
+{
+  "uid": 150058,
+  "tid": 47288722,
+  "observed_at": "2026-09-04T11:50:41+00:00",
+  "pages_fetched": 40,
+  "posts_in_current_view": 784,
+  "new_immutable_sources": 784,
+  "earliest_posted_at": "2026-07-31 15:10",
+  "latest_posted_at": "2026-09-04 15:09",
+  "review_path": "knowledge/derived/nga_tid47288722_review.jsonl",
+  "raw_root": "knowledge/raw_sources/nga_tid47288722"
+}
