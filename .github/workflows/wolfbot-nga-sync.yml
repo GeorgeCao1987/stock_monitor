@@ -48,15 +48,36 @@ jobs:
             echo "configured=true" >> "$GITHUB_OUTPUT"
           fi
 
+      - name: Diagnose author-only page
+        if: steps.credential.outputs.configured == 'true'
+        env:
+          NGA_COOKIE: ${{ secrets.NGA_COOKIE }}
+        run: |
+          python - <<'PY'
+          import hashlib, os, re, requests
+          from bs4 import BeautifulSoup
+          s=requests.Session()
+          s.headers.update({'User-Agent':'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/152 Safari/537.36','Accept-Language':'zh-CN,zh;q=0.9'})
+          raw=os.environ.get('NGA_COOKIE','').strip()
+          for part in raw.split(';'):
+              if '=' in part:
+                  k,v=part.split('=',1); s.cookies.set(k.strip(),v.strip())
+          for output in (False, True):
+              p={'tid':'47288722','authorid':'150058','page':'1'}
+              if output: p['__output']='11'
+              r=s.get('https://bbs.nga.cn/read.php',params=p,timeout=20)
+              t=r.text
+              soup=BeautifulSoup(t,'lxml')
+              print({'mode':'api' if output else 'html','status':r.status_code,'len':len(t),'sha256':hashlib.sha256(r.content).hexdigest(),'blocked':any(x in t for x in ['版面关闭','登录后访问','ERROR:2048','权限不足']),'postrows':len(soup.select("[id^='postrow']")),'postcontents':len(soup.select("[id^='postcontent']")),'has_R':'\"__R\"' in t,'has_T':'\"__T\"' in t,'has_PAGE':'\"__PAGE\"' in t,'authorid_occurrences':len(re.findall(r'authorid.?[:=].?150058',t))})
+          PY
+
       - name: Crawl and build rule candidates
         if: steps.credential.outputs.configured == 'true'
         env:
           NGA_COOKIE: ${{ secrets.NGA_COOKIE }}
           NGA_UID: "150058"
-          # User-provided current thread; authorid=150058 means only 阿狼's posts.
           NGA_TID: "47288722"
           NGA_SYNC_SLEEP: "1.0"
-          # First pass must be able to walk the complete author-only thread through today.
           NGA_SYNC_MAX_PAGES: "5000"
           NGA_BOOTSTRAP_MAX_PAGES: "5000"
           RULE_LLM_API_KEY: ${{ secrets.RULE_LLM_API_KEY }}
