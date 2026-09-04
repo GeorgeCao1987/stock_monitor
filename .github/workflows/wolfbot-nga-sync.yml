@@ -2,6 +2,9 @@ name: WolfBot NGA Knowledge Sync
 
 on:
   workflow_dispatch:
+  push:
+    paths:
+      - ".github/workflows/wolfbot-nga-sync.yml"
   schedule:
     - cron: "17 * * * *"
 
