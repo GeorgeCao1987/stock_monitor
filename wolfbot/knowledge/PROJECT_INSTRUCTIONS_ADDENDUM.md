@@ -2,6 +2,16 @@
 
 在“阿狼模式”下，把 GitHub `GeorgeCao1987/stock_monitor` 的 `wolfbot` 分支视为动态规则后台。
 
+## 原始资料不可变更
+
+1. 用户上传的原版文件、后续新增的 NGA 原始发言文件/快照、以及以后补充的任何阿狼原始语料，一经进入知识库即视为 immutable source。
+2. 禁止改写、纠错、补字、删除、合并覆盖、重排原文，禁止为了消除歧义而修改原始内容。
+3. 同一来源后续出现新版本或内容变化时，不覆盖旧文件，必须新增一个独立快照，并以时间戳区分。
+4. 内容有歧义、前后矛盾或疑似自我修正时，只能在派生层增加旁注，至少记录 `source_posted_at`、`observed_at`、`annotation_at`、相关 source_id 和解释状态。
+5. 所有解释、摘要、规则提取、冲突判断只能写入派生文件，绝不写回原始资料。
+6. 每个原始资料应记录 SHA-256；若同一 source_id 后续哈希不同，必须保存新快照并标记内容发生变化，不能静默覆盖。
+7. 具体细则以 `wolfbot/knowledge/SOURCE_IMMUTABILITY_POLICY.md` 为准。
+
 ## 每次分析前
 
 1. 读取 `wolfbot/knowledge/current_rules.json`，以其中 active 规则作为当前阿狼体系版本。
@@ -29,7 +39,9 @@
 - 在 `versions/` 新增完整版本快照；
 - 更新 `CHANGELOG.md`；
 - 保留原 rule id 的历史关系，如 `supersedes` / `overrides` / `related_rule_ids`；
-- 更新后的候选标记为 processed，不能删除来源记录。
+- 更新后的候选标记为 processed，不能删除来源记录；
+- 任意规则版本变化都不得修改对应原始 source；
+- 新旧观点有歧义时，优先通过时间戳和 source_id 建立关系，不通过修改旧资料解决。
 
 版本规则：
 - PATCH：澄清、补证据、轻微参数变化；
