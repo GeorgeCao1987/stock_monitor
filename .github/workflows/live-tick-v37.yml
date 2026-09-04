@@ -2,8 +2,8 @@ name: live-tick-v37
 
 on:
   schedule:
-    # GitHub cron is UTC. The job itself filters A-share trading time.
-    - cron: '*/5 1-7 * * 1-5'
+    # Trigger about one minute after each five-minute bar close (UTC cron).
+    - cron: '1-56/5 1-7 * * 1-5'
   workflow_dispatch:
   push:
     paths:
@@ -45,7 +45,7 @@ jobs:
         run: |
           python - <<'PY'
           import os
-          from datetime import datetime, timedelta
+          from datetime import datetime
           from zoneinfo import ZoneInfo
           import pandas as pd
           import exchange_calendars as xcals
@@ -53,13 +53,17 @@ jobs:
           tz = ZoneInfo('Asia/Shanghai')
           now = datetime.now(tz)
           cal = xcals.get_calendar('XSHG')
-          is_trading = bool(cal.is_session(pd.Timestamp(now.date())))
+          today = pd.Timestamp(now.date())
+          is_trading = bool(cal.is_session(today))
           hhmm = now.strftime('%H:%M')
           in_window = ('09:30' <= hhmm <= '11:35') or ('13:00' <= hhmm <= '15:10')
           should_run = is_trading and in_window
-          train_end = now.date() - timedelta(days=1)
 
-          # Deduplicate delayed/bunched GitHub cron runs by the current five-minute bucket.
+          # Model/cache cutoff is the previous actual XSHG trading session, not yesterday's calendar date.
+          prev_session = cal.previous_session(today) if is_trading else cal.date_to_session(today, direction='previous')
+          train_end = prev_session.date()
+
+          # Jobs fire roughly one minute after a bar close; floor to the corresponding 5m bar.
           minute = (now.minute // 5) * 5
           bucket = now.replace(minute=minute, second=0, microsecond=0)
           tick_key = bucket.strftime('%Y%m%d-%H%M')
@@ -71,7 +75,8 @@ jobs:
               f.write(f'MARKET_END_DATE={train_end.isoformat()}\n')
               f.write(f'LIVE_CACHE_KEY=live-v37-{train_end.isoformat()}\n')
               f.write(f'TICK_MARKER_KEY=live-tick-sent-{tick_key}\n')
-          print('NOW', now.isoformat(), 'TRADING', is_trading, 'WINDOW', in_window, 'TICK_KEY', tick_key)
+          print('NOW', now.isoformat(), 'TRADING', is_trading, 'WINDOW', in_window,
+                'TRAIN_END', train_end, 'TICK_KEY', tick_key)
           PY
 
       - name: Restore live model cache
