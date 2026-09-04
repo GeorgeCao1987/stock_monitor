@@ -1,0 +1,23 @@
+{
+  "source_id": "NGA-45974302-F168419-20260629T135500+0800",
+  "source_type": "nga_public_search_cache_snapshot",
+  "immutable": true,
+  "author_uid": "150058",
+  "author_display": "-阿狼-",
+  "thread_id": "45974302",
+  "thread_title_at_capture": "自立自强，科学技术打头阵",
+  "page": 8421,
+  "floor_no": 168419,
+  "source_posted_at": "2026-06-29T13:55:00+08:00",
+  "observed_at": "2026-09-04T18:45:00+08:00",
+  "source_url": "https://bbs.nga.cn/read.php?page=8421&tid=45974302",
+  "capture_form": "public_search_cache_text_snapshot",
+  "verification": "direct_post_row_with_UID_150058_visible",
+  "full_capture_sha256": "d4edf7772cfd314505987e96ba5e4361d3b1af38fc0a1be9e106f1e16c94c8c0",
+  "full_capture_length_chars": 167,
+  "verbatim_excerpt": "我还是和你们说 一切以事实说话",
+  "copyright_note": "完整公开网页正文不在版本库复制；以来源指针、时间戳、内容哈希和短摘录固化。若用户后续提供其自有导出原始文件，则可按字节原样归档。",
+  "rule_decision": "reinforce",
+  "related_rule_ids": ["R004", "R005"],
+  "annotation_status": "verified_direct_source"
+}
