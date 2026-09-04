@@ -1,29 +1,23 @@
 name: live-monitor-v37
 
 on:
-  schedule:
-    # Single early start. GitHub schedule can be delayed, so never use multiple retry schedules
-    # together with cancel-in-progress.
-    - cron: '30 0 * * 1-5'  # 08:30 China/Singapore time
   workflow_dispatch:
   push:
     paths:
       - 'market_data/live_monitor_v37.py'
-      - 'market_data/live_start_trigger.txt'
       - '.github/workflows/live-monitor-v37.yml'
 
 permissions:
   contents: read
   actions: read
 
-# Critical: a delayed GitHub schedule must NEVER cancel an already-running market session.
 concurrency:
-  group: live-monitor-v37
+  group: live-monitor-v37-manual
   cancel-in-progress: false
 
 jobs:
   smoke-test:
-    if: github.event_name == 'push' && !contains(github.event.head_commit.message, '[live-start]')
+    if: github.event_name == 'push'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -31,10 +25,10 @@ jobs:
         with:
           python-version: '3.11'
       - name: Syntax check
-        run: python -m py_compile market_data/live_monitor_v37.py market_data/asof_replay_v37.py market_data/feishu_notifier.py market_data/prepare_live_model_v37.py
+        run: python -m py_compile market_data/live_monitor_v37.py market_data/live_tick_v37.py market_data/asof_replay_v37.py market_data/feishu_notifier.py market_data/prepare_live_model_v37.py
 
   realtime-monitor:
-    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && contains(github.event.head_commit.message, '[live-start]'))
+    if: github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     timeout-minutes: 350
     env:
@@ -82,23 +76,8 @@ jobs:
             market_data/results/completeness.csv
             market_data/live_cache
           key: ${{ env.LIVE_CACHE_KEY }}
-      - name: Fallback collect and prepare cache
-        if: steps.market_day.outputs.is_trading == 'true' && steps.live_cache.outputs.cache-hit != 'true'
-        working-directory: market_data
-        run: |
-          rm -rf data results live_cache && mkdir -p data results live_cache
-          python oos_core_collect.py
-          python prepare_live_model_v37.py
-      - name: Run live V3.7 monitor
-        if: steps.market_day.outputs.is_trading == 'true'
+      - name: Run manual long monitor
+        if: steps.market_day.outputs.is_trading == 'true' && steps.live_cache.outputs.cache-hit == 'true'
         env:
           FEISHU_WEBHOOK_URL: ${{ secrets.FEISHU_WEBHOOK_URL }}
         run: python market_data/live_monitor_v37.py
-      - name: Upload live audit
-        if: always() && steps.market_day.outputs.is_trading == 'true'
-        uses: actions/upload-artifact@v4
-        with:
-          name: live-monitor-v37-${{ github.run_id }}
-          path: |
-            market_data/results/live_monitor_v37.jsonl
-            market_data/results/completeness.csv
